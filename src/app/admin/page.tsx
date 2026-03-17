@@ -6,57 +6,92 @@ export default function AdminDashboard() {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
-  const [cachedTime, setCachedTime] = useState('');
 
   useEffect(() => {
     async function fetchDashboardData() {
       try {
-        const { data: branches, error: branchError } = await supabase.from('branches').select('*');
-        if (branchError) throw branchError;
+        // 1. Fetch all required tables
+        const [branchesRes, bookingsRes, patientsRes, usersRes] = await Promise.all([
+          supabase.from('branches').select('*').eq('status', 'Active'),
+          supabase.from('bookings').select('booking_date, shift_time, branch_id, patient_id, status'),
+          supabase.from('patients').select('user_id, home_branch_id'),
+          supabase.from('users').select('user_id, role_id, user_is_active')
+        ]);
 
-        const { data: bookings, error: bookingError } = await supabase.from('bookings').select('*');
-        if (bookingError) throw bookingError;
+        if (branchesRes.error) throw branchesRes.error;
+        
+        const branches = branchesRes.data || [];
+        const bookings = bookingsRes.data || [];
+        const patients = patientsRes.data || [];
+        const users = usersRes.data || [];
 
-        const { data: patients, error: patientError } = await supabase.from('patients').select('*');
-        if (patientError) throw patientError;
+        // 2. Calculate Total Active Patients (Role 5 = Patient)
+        const totalActivePatients = users.filter(u => u.role_id === 5 && u.user_is_active).length;
 
-        const occupancyData = branches?.map(b => ({
-          name: b.branch_name,
-          occupancy: Math.round(((b.total_machines - b.available_slots) / b.total_machines) * 100) || 0
-        })) || [];
-
-        const morning = bookings?.filter(b => b.shift_time?.toLowerCase() === 'morning').length || 0;
-        const afternoon = bookings?.filter(b => b.shift_time?.toLowerCase() === 'afternoon').length || 0;
-        const evening = bookings?.filter(b => b.shift_time?.toLowerCase() === 'evening').length || 0;
-
-        const total = bookings?.length || 0;
-
-        const crossBranch = bookings?.filter(b => {
-          const patient = patients?.find(p => p.id === b.patient_id);
-          return patient && b.branch_id !== patient.home_branch_id;
-        }).length || 0;
-
-        setData({
-          branches: occupancyData,
-          sessionTimes: { 
-            morning, 
-            afternoon, 
-            evening, 
-            total: total > 0 ? total : 1 
-        },
-          crossBranchVisits: crossBranch,
-          isEmpty: branches?.length === 0
+        // 3. Calculate Network Capacity
+        let totalNetworkMachines = 0;
+        let totalAvailableSlots = 0;
+        
+        const occupancyData = branches.map(b => {
+          totalNetworkMachines += b.total_machines || 0;
+          totalAvailableSlots += b.available_slots || 0;
+          
+          const usedSlots = (b.total_machines || 0) - (b.available_slots || 0);
+          const occupancy = b.total_machines ? Math.round((usedSlots / b.total_machines) * 100) : 0;
+          
+          return { name: b.branch_name, occupancy, usedSlots, total: b.total_machines };
         });
+
+        const networkUtilization = totalNetworkMachines ? Math.round(((totalNetworkMachines - totalAvailableSlots) / totalNetworkMachines) * 100) : 0;
+
+        // 4. Calculate Popular Session Times (Updated for True Bar Chart)
+        let morning = 0, afternoon = 0, evening = 0;
+        bookings.forEach(b => {
+          const shift = b.shift_time?.toLowerCase();
+          if (shift === 'morning') morning++;
+          else if (shift === 'afternoon') afternoon++;
+          else if (shift === 'evening') evening++;
+        });
+        
+        const totalSessions = morning + afternoon + evening;
+        // Find the highest value to set the 100% height scale (minimum 1 to prevent division by zero)
+        const maxSessionLoad = Math.max(morning, afternoon, evening, 1);
+
+        // 5. Calculate Cross-Branch Visits (Guest Bookings)
+        const crossBranchVisits = bookings.filter(b => {
+          const patientProfile = patients.find(p => p.user_id === b.patient_id);
+          return patientProfile && b.branch_id !== patientProfile.home_branch_id;
+        }).length;
+
+        // 6. Calculate Weekly Patient Load (Mon - Sun)
+        const weeklyLoad = [0, 0, 0, 0, 0, 0, 0];
+        bookings.forEach(b => {
+          if (b.booking_date) {
+            const date = new Date(b.booking_date);
+            const day = date.getDay();
+            const index = day === 0 ? 6 : day - 1;
+            weeklyLoad[index]++;
+          }
+        });
+        const maxWeeklyLoad = Math.max(...weeklyLoad, 1);
+
+        // 7. Set Final State
+        setData({
+          totalActivePatients,
+          networkUtilization,
+          totalNetworkMachines,
+          branches: occupancyData,
+          sessionTimes: { morning, afternoon, evening, total: totalSessions, max: maxSessionLoad },
+          crossBranchVisits,
+          weeklyLoad,
+          maxWeeklyLoad,
+          isEmpty: branches.length === 0
+        });
+        
         setIsError(false);
       } catch (error) {
+        console.error("Dashboard fetch error:", error);
         setIsError(true);
-        setData({
-          branches: [{ name: 'Penang General', occupancy: 85 }, { name: 'Johor Specialist', occupancy: 60 }],
-          sessionTimes: { morning: 40, afternoon: 90, evening: 30, total: 160 },
-          crossBranchVisits: 24,
-          isEmpty: false
-        });
-        setCachedTime(new Date().toLocaleString());
       } finally {
         setIsLoading(false);
       }
@@ -66,15 +101,28 @@ export default function AdminDashboard() {
   }, []);
 
   if (isLoading) {
-    return <div className='p-8 text-slate-600'>Loading network telemetry...</div>;
+    return <div className='p-8 text-slate-600 font-sans text-center mt-20'>Loading Network Telemetry...</div>;
   }
 
-  if (data?.isEmpty && !isError) {
+  if (isError) {
     return (
       <main className='p-8 bg-slate-50 min-h-screen font-sans'>
-        <div className='max-w-6xl mx-auto text-center py-20'>
+        <div className='max-w-6xl mx-auto'>
+          <div className='p-6 bg-red-50 border border-red-200 rounded-2xl text-red-800 text-center'>
+            <h2 className='text-lg font-bold mb-2'>Connection Error</h2>
+            <p>Unable to retrieve real-time network data from the database. Please check your connection and try again.</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (data?.isEmpty) {
+    return (
+      <main className='p-8 bg-slate-50 min-h-screen font-sans'>
+        <div className='max-w-6xl mx-auto text-center py-20 bg-white rounded-3xl border border-slate-200 shadow-sm'>
           <h1 className='text-2xl font-bold text-slate-800 mb-2'>Network Dashboard</h1>
-          <p className='text-slate-500'>No operational data available for the current period.</p>
+          <p className='text-slate-500'>No active branches found. Please register branches in the network to view telemetry.</p>
         </div>
       </main>
     );
@@ -85,94 +133,130 @@ export default function AdminDashboard() {
       <div className='max-w-6xl mx-auto'>
         
         <div className='mb-8'>
-          <h1 className='text-3xl font-bold text-slate-800'>Network Dashboard</h1>
-          <p className='text-slate-600 mt-2'>Real-time aggregated data and operational health</p>
+          <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Network Dashboard</h1>
+          <p className='text-slate-500 mt-1 font-medium'>Real-time aggregated data and operational health</p>
         </div>
 
-        {isError && (
-          <div className='mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800'>
-            <p className='font-semibold'>Unable to load dashboard metrics. Please try again later.</p>
-            <p className='text-sm mt-1'>Displaying cached data from: {cachedTime}</p>
+        {/* High-Level KPIs */}
+        <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-6'>
+          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
+            <div className='h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl'>👥</div>
+            <div>
+              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>Total Patients</p>
+              <p className='text-3xl font-black text-slate-800'>{data.totalActivePatients}</p>
+            </div>
           </div>
-        )}
+          
+          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
+            <div className='h-14 w-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl'>⚙️</div>
+            <div>
+              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>Network Machines</p>
+              <p className='text-3xl font-black text-slate-800'>{data.totalNetworkMachines}</p>
+            </div>
+          </div>
 
+          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
+            <div className='h-14 w-14 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl'>📊</div>
+            <div>
+              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>System Utilization</p>
+              <p className='text-3xl font-black text-slate-800'>{data.networkUtilization}%</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Analytics Grid */}
         <div className='grid grid-cols-1 md:grid-cols-2 gap-6 mb-8'>
           
-          <div className='bg-white p-6 rounded-xl border border-slate-200 shadow-sm'>
-            <h2 className='text-lg font-semibold text-slate-800 mb-4'>Live Branch Occupancy</h2>
-            <div className='space-y-4'>
-              {data?.branches?.map((branch: any) => (
+          {/* Branch Occupancy */}
+          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm'>
+            <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Live Branch Occupancy</h2>
+            <div className='space-y-5'>
+              {data.branches.map((branch: any) => (
                 <div key={branch.name}>
-                  <div className='flex justify-between text-sm mb-1'>
-                    <span className='text-slate-600'>{branch.name}</span>
-                    <span className='font-medium text-slate-800'>{branch.occupancy}%</span>
+                  <div className='flex justify-between text-sm mb-2'>
+                    <span className='font-semibold text-slate-700'>{branch.name}</span>
+                    <span className='font-bold text-blue-600'>{branch.occupancy}% <span className='text-slate-400 font-medium text-xs'>({branch.usedSlots}/{branch.total})</span></span>
                   </div>
-                  <div className='w-full bg-slate-100 rounded-full h-2'>
-                    <div className='bg-blue-600 h-2 rounded-full' style={{ width: `${branch.occupancy}%` }}></div>
+                  <div className='w-full bg-slate-100 rounded-full h-2.5'>
+                    <div 
+                      className={`h-2.5 rounded-full transition-all duration-1000 ${branch.occupancy > 85 ? 'bg-red-500' : branch.occupancy > 60 ? 'bg-amber-400' : 'bg-blue-500'}`} 
+                      style={{ width: `${branch.occupancy}%` }}
+                    ></div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className='bg-white p-6 rounded-xl border border-slate-200 shadow-sm'>
-  <h2 className='text-lg font-semibold text-slate-800 mb-4'>Popular Session Times</h2>
-  <div className='flex items-end gap-2 h-32 mt-4'>
-    {/* Morning Bar */}
-    <div className='flex-1 bg-blue-100 rounded-t flex flex-col justify-end group'>
-      <div 
-        className='bg-blue-400 rounded-t w-full transition-all duration-500' 
-        style={{ height: `${(data.sessionTimes.morning / data.sessionTimes.total) * 100}%` }}
-      ></div>
-      <span className='text-xs text-center mt-2 text-slate-500 font-medium'>
-        {data.sessionTimes.morning} Morning
-      </span>
-    </div>
+          {/* NEW: True Relative Bar Chart for Popular Session Times */}
+          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
+            <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Popular Session Times</h2>
+            <div className='flex items-end gap-4 h-32 mt-auto border-b border-slate-100 pb-2'>
+              
+              {/* Morning Bar */}
+              <div className='flex-1 flex flex-col justify-end group relative h-full'>
+                {data.sessionTimes.morning > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.morning}</span>}
+                <div 
+                  className='bg-sky-400 rounded-t-md hover:bg-sky-500 transition-all duration-700 w-full mt-auto' 
+                  style={{ height: `${(data.sessionTimes.morning / data.sessionTimes.max) * 100}%`, minHeight: data.sessionTimes.morning > 0 ? '10%' : '0%' }}
+                ></div>
+              </div>
 
-    {/* Afternoon Bar */}
-    <div className='flex-1 bg-blue-100 rounded-t flex flex-col justify-end group'>
-      <div 
-        className='bg-blue-600 rounded-t w-full transition-all duration-500' 
-        style={{ height: `${(data.sessionTimes.afternoon / data.sessionTimes.total) * 100}%` }}
-      ></div>
-      <span className='text-xs text-center mt-2 text-slate-500 font-medium'>
-        {data.sessionTimes.afternoon} Afternoon
-      </span>
-    </div>
+              {/* Afternoon Bar */}
+              <div className='flex-1 flex flex-col justify-end group relative h-full'>
+                {data.sessionTimes.afternoon > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.afternoon}</span>}
+                <div 
+                  className='bg-blue-600 rounded-t-md hover:bg-blue-700 transition-all duration-700 w-full mt-auto' 
+                  style={{ height: `${(data.sessionTimes.afternoon / data.sessionTimes.max) * 100}%`, minHeight: data.sessionTimes.afternoon > 0 ? '10%' : '0%' }}
+                ></div>
+              </div>
 
-    {/* Evening Bar */}
-    <div className='flex-1 bg-blue-100 rounded-t flex flex-col justify-end group'>
-      <div 
-        className='bg-blue-300 rounded-t w-full transition-all duration-500' 
-        style={{ height: `${(data.sessionTimes.evening / data.sessionTimes.total) * 100}%` }}
-      ></div>
-      <span className='text-xs text-center mt-2 text-slate-500 font-medium'>
-        {data.sessionTimes.evening} Evening
-      </span>
-    </div>
-  </div>
-</div>
+              {/* Evening Bar */}
+              <div className='flex-1 flex flex-col justify-end group relative h-full'>
+                {data.sessionTimes.evening > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.evening}</span>}
+                <div 
+                  className='bg-indigo-800 rounded-t-md hover:bg-indigo-900 transition-all duration-700 w-full mt-auto' 
+                  style={{ height: `${(data.sessionTimes.evening / data.sessionTimes.max) * 100}%`, minHeight: data.sessionTimes.evening > 0 ? '10%' : '0%' }}
+                ></div>
+              </div>
 
-          <div className='bg-white p-6 rounded-xl border border-slate-200 shadow-sm'>
-            <h2 className='text-lg font-semibold text-slate-800 mb-4'>Cross-Branch Visits</h2>
-            <div className='flex items-center justify-center h-32'>
+            </div>
+            
+            <div className='flex gap-4 mt-3'>
+              <span className='flex-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest'>Morning</span>
+              <span className='flex-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest'>Afternoon</span>
+              <span className='flex-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest'>Evening</span>
+            </div>
+          </div>
+
+          {/* Cross-Branch Guest Tracker */}
+          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm'>
+            <h2 className='text-sm font-bold text-slate-800 mb-2 uppercase tracking-wider'>Cross-Branch Mobility</h2>
+            <p className='text-xs text-slate-500 mb-6'>Patients currently booked outside their home branch.</p>
+            <div className='flex items-center justify-center h-32 bg-emerald-50 rounded-xl border border-emerald-100'>
               <div className='text-center'>
-                <div className='text-4xl font-bold text-emerald-600'>{data?.crossBranchVisits}</div>
-                <div className='text-sm text-slate-500 mt-1'>Active Guest Patients</div>
+                <div className='text-5xl font-black text-emerald-600'>{data.crossBranchVisits}</div>
+                <div className='text-sm font-bold text-emerald-800 mt-2 uppercase tracking-widest'>Active Guest Bookings</div>
               </div>
             </div>
           </div>
 
-          <div className='bg-white p-6 rounded-xl border border-slate-200 shadow-sm'>
-            <h2 className='text-lg font-semibold text-slate-800 mb-4'>Weekly Patient Load</h2>
-            <div className='flex items-end gap-2 h-32 mt-4'>
-              {[60, 65, 70, 75, 80, 85, 90].map((height, index) => (
-                <div key={index} className='flex-1 bg-indigo-500 rounded-t hover:bg-indigo-600 transition-colors' style={{ height: `${height}%` }}></div>
+          {/* Dynamic Weekly Patient Load */}
+          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
+            <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Weekly System Load</h2>
+            <div className='flex items-end gap-2 h-32 mt-auto border-b border-slate-100 pb-2'>
+              {data.weeklyLoad.map((count: number, index: number) => (
+                <div key={index} className='flex-1 flex flex-col justify-end group relative h-full'>
+                  {count > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{count}</span>}
+                  <div 
+                    className='bg-indigo-500 rounded-t-md hover:bg-indigo-600 transition-all duration-700 w-full mt-auto' 
+                    style={{ height: `${(count / data.maxWeeklyLoad) * 100}%`, minHeight: count > 0 ? '10%' : '0%' }}
+                  ></div>
+                </div>
               ))}
             </div>
-            <div className='flex justify-between text-xs text-slate-500 mt-2'>
-              <span>Mon</span>
-              <span>Sun</span>
+            <div className='flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-3 px-1'>
+              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
             </div>
           </div>
 

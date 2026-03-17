@@ -25,12 +25,13 @@ export default function BranchManagement() {
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [markerPosition, setMarkerPosition] = useState<{lat: number, lng: number} | null>(null);
 
-  // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'view' | 'edit' | 'add'>('view');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<any>(null);
+  const [branchStats, setBranchStats] = useState({ staff: 0, bookings: 0 });
   
   const [formData, setFormData] = useState({
     name: '',
@@ -39,8 +40,6 @@ export default function BranchManagement() {
     machines: '',
     manager_id: ''
   });
-
-  const [selectedBranch, setSelectedBranch] = useState<any>(null);
 
   async function fetchData() {
     setIsLoading(true);
@@ -84,8 +83,9 @@ export default function BranchManagement() {
   };
 
   const openAddModal = () => {
-    setEditingId(null);
     setViewMode('add');
+    setEditingId(null);
+    setSelectedBranch(null);
     setFormData({ name: '', address: '', contact: '', machines: '', manager_id: '' });
     setMapCenter(defaultCenter);
     setMarkerPosition(null);
@@ -93,10 +93,11 @@ export default function BranchManagement() {
     setIsModalOpen(true);
   };
 
-  const openViewModal = (branch: any) => {
+  const openDetailsModal = async (branch: any) => {
     setSelectedBranch(branch);
     setEditingId(branch.id);
     setViewMode('view');
+    
     setFormData({
       name: branch.branch_name || '',
       address: branch.branch_address || '',
@@ -104,8 +105,34 @@ export default function BranchManagement() {
       machines: branch.total_machines ? branch.total_machines.toString() : '',
       manager_id: branch.manager_id ? branch.manager_id.toString() : ''
     });
+    
     setMapCenter(defaultCenter);
     setMarkerPosition(null);
+    setError('');
+    
+    const { count: staffCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('branch_id', branch.id);
+    const today = new Date().toISOString().split('T')[0];
+    const { count: bookingCount } = await supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('branch_id', branch.id).gte('booking_date', today).in('status', ['CONFIRMED', 'PENDING_REVIEW']);
+    
+    setBranchStats({
+      staff: staffCount || 0,
+      bookings: bookingCount || 0
+    });
+
+    if (isLoaded && window.google) {
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ address: branch.branch_address }, (results, status) => {
+        if (status === 'OK' && results && results[0]) {
+          const loc = {
+            lat: results[0].geometry.location.lat(),
+            lng: results[0].geometry.location.lng()
+          };
+          setMapCenter(loc);
+          setMarkerPosition(loc);
+        }
+      });
+    }
+
     setIsModalOpen(true);
   };
 
@@ -114,29 +141,71 @@ export default function BranchManagement() {
     setIsSubmitting(true);
     setError('');
 
-    const payload = {
-      branch_name: formData.name,
-      branch_address: formData.address,
-      branch_contact: formData.contact,
-      total_machines: parseInt(formData.machines),
+    if (!formData.name.trim() || !formData.address.trim() || !formData.contact.trim() || !formData.machines) {
+      setError('Error: All fields are required and cannot be blank.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const contactRegex = /^[\d\s\-\+\(\)]{8,20}$/;
+    if (!contactRegex.test(formData.contact.trim())) {
+      setError('Error: Please enter a valid contact number (e.g., 03-12345678).');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const machineCount = parseInt(formData.machines);
+    if (isNaN(machineCount) || machineCount < 1) {
+      setError('Error: Total machines must be a valid number greater than 0.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const isDuplicate = branches.some(b => 
+      b.id !== editingId && 
+      (b.branch_name.toLowerCase() === formData.name.trim().toLowerCase() || 
+       b.branch_address.toLowerCase() === formData.address.trim().toLowerCase())
+    );
+
+    if (isDuplicate) {
+      setError('Error: A branch with this name or location already exists.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const payload: any = {
+      branch_name: formData.name.trim(),
+      branch_address: formData.address.trim(),
+      branch_contact: formData.contact.trim(),
+      total_machines: machineCount,
       manager_id: formData.manager_id ? parseInt(formData.manager_id) : null
     };
 
-    if (editingId && viewMode === 'edit') {
+    if (viewMode === 'edit' && editingId && selectedBranch) {
+      const machineDifference = machineCount - selectedBranch.total_machines;
+      const newAvailableSlots = selectedBranch.available_slots + machineDifference;
+      
+      payload.available_slots = newAvailableSlots < 0 ? 0 : newAvailableSlots;
+
       const { error: updateError } = await supabase.from('branches').update(payload).eq('id', editingId);
+      
       if (updateError) {
-        setError(updateError.message);
+        setError(`Update failed: ${updateError.message}`);
         setIsSubmitting(false);
         return;
       }
     } else if (viewMode === 'add') {
-      const { error: insertError } = await supabase.from('branches').insert([{ 
-        ...payload, 
-        available_slots: payload.total_machines,
-        status: 'Active' 
-      }]);
+      payload.available_slots = machineCount;
+      payload.status = 'Active';
+
+      const { error: insertError } = await supabase.from('branches').insert([payload]);
+      
       if (insertError) {
-        setError(insertError.message);
+        if (insertError.message.includes('branches_pkey')) {
+          setError('System Error: Database ID conflict. Please run the SQL reset script to resync the ID counter.');
+        } else {
+          setError(`Creation failed: ${insertError.message}`);
+        }
         setIsSubmitting(false);
         return;
       }
@@ -196,6 +265,8 @@ export default function BranchManagement() {
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
           {filteredBranches.map(branch => {
             const isActive = branch.status === 'Active';
+            // Changed from m.id to m.user_id
+            const assignedManager = managers.find(m => m.user_id === branch.manager_id);
 
             return (
               <div key={branch.id} className={`bg-white p-6 rounded-2xl border ${isActive ? 'border-slate-200' : 'border-red-100 bg-red-50/20'} shadow-sm flex flex-col hover:shadow-md transition-shadow`}>
@@ -224,7 +295,7 @@ export default function BranchManagement() {
                 </div>
 
                 <div className='pt-5 border-t border-slate-100 flex gap-2'>
-                  <button onClick={() => openViewModal(branch)} className='flex-1 bg-slate-50 text-slate-700 py-2.5 rounded-xl text-xs font-bold hover:bg-slate-100 border border-slate-200 transition-colors'>View Details</button>
+                  <button onClick={() => openDetailsModal(branch)} className='flex-1 bg-slate-50 text-slate-700 py-2.5 rounded-xl text-xs font-bold hover:bg-slate-100 border border-slate-200 transition-colors'>View Details</button>
                   {isActive ? (
                     <button onClick={() => handleDeactivate(branch.id)} className='px-4 bg-white text-red-500 py-2.5 rounded-xl text-xs font-bold hover:bg-red-50 border border-red-100 transition-colors'>Deactivate</button>
                   ) : (
@@ -237,74 +308,87 @@ export default function BranchManagement() {
         </div>
       </div>
 
-      {/* Main Branch Modal (View / Edit / Add) */}
       {isModalOpen && (
         <div className='fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4'>
-          <div className='bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200'>
+          <div className={`bg-white rounded-3xl shadow-2xl w-full ${viewMode === 'view' ? 'max-w-4xl' : 'max-w-2xl'} overflow-hidden animate-in fade-in zoom-in duration-200`}>
             
-            {/* Modal Header */}
             <div className='px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50'>
               <div>
                 <h2 className='text-xl font-extrabold text-slate-900'>
-                  {viewMode === 'view' ? 'Branch Details' : viewMode === 'edit' ? 'Update Branch' : 'New Branch Entry'}
+                  {viewMode === 'view' ? 'Branch Record' : viewMode === 'edit' ? 'Edit Branch' : 'Register New Branch'}
                 </h2>
-                {viewMode === 'view' && <p className='text-xs text-slate-500 font-medium'>Internal Facility Record ID: #{editingId}</p>}
+                {editingId && <p className='text-xs text-slate-500 font-medium'>Internal Facility ID: #{editingId}</p>}
               </div>
               <button onClick={() => setIsModalOpen(false)} className='text-slate-400 hover:text-slate-600 text-2xl'>&times;</button>
             </div>
             
             <div className='p-8'>
-              {viewMode === 'view' ? (
-                /* DETAILED VIEW MODE */
-                <div className='grid grid-cols-2 gap-8'>
+              {viewMode === 'view' && selectedBranch ? (
+                <div className='grid grid-cols-1 md:grid-cols-2 gap-8'>
                   <div className='space-y-6'>
                     <div>
-                      <label className='text-[10px] font-bold text-blue-500 uppercase tracking-widest'>Facility Name</label>
-                      <p className='text-lg font-bold text-slate-800'>{selectedBranch?.branch_name}</p>
+                      <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Facility Name</h3>
+                      <p className='text-lg font-bold text-slate-800'>{selectedBranch.branch_name}</p>
                     </div>
                     <div>
-                      <label className='text-[10px] font-bold text-blue-500 uppercase tracking-widest'>Official Address</label>
-                      <p className='text-sm text-slate-600 leading-relaxed'>{selectedBranch?.branch_address}</p>
-                    </div>
-                    <div>
-                      <label className='text-[10px] font-bold text-blue-500 uppercase tracking-widest'>Assigned Manager</label>
+                      <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Branch Manager</h3>
                       <p className='text-sm font-semibold text-slate-800'>
-                        {managers.find(m => m.id === selectedBranch?.manager_id)?.user_fullname || 'Not Assigned'}
+                        {/* Changed from m.id to m.user_id */}
+                        {managers.find(m => m.user_id === selectedBranch.manager_id)?.user_fullname || 'Unassigned'}
                       </p>
                     </div>
+                    <div>
+                      <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Contact Number</h3>
+                      <p className='text-sm text-slate-800'>{selectedBranch.branch_contact}</p>
+                    </div>
+                    <div>
+                      <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Official Address</h3>
+                      <p className='text-sm text-slate-600 leading-relaxed'>{selectedBranch.branch_address}</p>
+                    </div>
                   </div>
 
                   <div className='space-y-6'>
-                    <div className='bg-slate-50 p-4 rounded-2xl border border-slate-100'>
-                      <label className='text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-3'>Resource Snapshot</label>
-                      <div className='flex justify-between items-center mb-2'>
-                        <span className='text-xs font-medium text-slate-600'>Total Machines</span>
-                        <span className='text-sm font-bold text-slate-800'>{selectedBranch?.total_machines}</span>
+                    <div className='bg-slate-50 p-5 rounded-2xl border border-slate-100'>
+                      <h3 className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4'>Resource & Capacity Snapshot</h3>
+                      
+                      <div className='grid grid-cols-2 gap-4 mb-4'>
+                        <div className='bg-white p-3 rounded-xl border border-slate-100 shadow-sm'>
+                          <p className='text-[10px] font-bold text-slate-400 uppercase'>Total Machines</p>
+                          <p className='text-lg font-black text-slate-800'>{selectedBranch.total_machines}</p>
+                        </div>
+                        <div className='bg-white p-3 rounded-xl border border-slate-100 shadow-sm'>
+                          <p className='text-[10px] font-bold text-slate-400 uppercase'>Available Slots</p>
+                          <p className='text-lg font-black text-emerald-600'>{selectedBranch.available_slots}</p>
+                        </div>
                       </div>
-                      <div className='flex justify-between items-center mb-2'>
-                        <span className='text-xs font-medium text-slate-600'>Current Availability</span>
-                        <span className='text-sm font-bold text-emerald-600'>{selectedBranch?.available_slots} Slots</span>
-                      </div>
-                      <div className='flex justify-between items-center'>
-                        <span className='text-xs font-medium text-slate-600'>Branch Status</span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${selectedBranch?.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                          {selectedBranch?.status}
-                        </span>
+
+                      <div className='space-y-2'>
+                        <div className='flex justify-between items-center text-sm'>
+                          <span className='font-medium text-slate-600'>Active Staff Assigned</span>
+                          <span className='font-bold text-slate-800'>{branchStats.staff} personnel</span>
+                        </div>
+                        <div className='flex justify-between items-center text-sm'>
+                          <span className='font-medium text-slate-600'>Active Future Bookings</span>
+                          <span className='font-bold text-slate-800'>{branchStats.bookings} sessions</span>
+                        </div>
                       </div>
                     </div>
-                    <div>
-                      <label className='text-[10px] font-bold text-blue-500 uppercase tracking-widest'>Contact Support</label>
-                      <p className='text-sm font-bold text-slate-800'>{selectedBranch?.branch_contact}</p>
-                    </div>
+
+                    {isLoaded && (
+                      <div className='h-40 rounded-2xl overflow-hidden border border-slate-200 shadow-inner'>
+                        <GoogleMap mapContainerStyle={{ width: '100%', height: '100%' }} center={mapCenter} zoom={markerPosition ? 15 : 10} options={{ disableDefaultUI: true, zoomControl: true }}>
+                          {markerPosition && <Marker position={markerPosition} />}
+                        </GoogleMap>
+                      </div>
+                    )}
                   </div>
 
-                  <div className='col-span-2 pt-6 border-t border-slate-100 flex gap-3'>
-                    <button onClick={() => setViewMode('edit')} className='flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all'>Enter Edit Mode</button>
-                    <button onClick={() => setIsModalOpen(false)} className='flex-1 bg-white text-slate-500 py-3 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition-all'>Close Preview</button>
+                  <div className='col-span-1 md:col-span-2 pt-6 border-t border-slate-100 flex gap-3'>
+                    <button onClick={() => setIsModalOpen(false)} className='flex-1 bg-white text-slate-600 py-3.5 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition-all'>Close</button>
+                    <button onClick={() => setViewMode('edit')} className='flex-1 bg-slate-900 text-white py-3.5 rounded-xl font-bold hover:bg-slate-800 transition-all'>Edit Branch Details</button>
                   </div>
                 </div>
               ) : (
-                /* EDIT/ADD FORM MODE */
                 <form onSubmit={handleSaveBranch} className='space-y-5 overflow-y-auto max-h-[60vh] pr-2'>
                   <div className='grid grid-cols-2 gap-4'>
                     <div className='col-span-2'>
@@ -345,7 +429,8 @@ export default function BranchManagement() {
                       <select name='manager_id' required className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 appearance-none' value={formData.manager_id} onChange={handleInputChange}>
                         <option value=''>Select available manager...</option>
                         {managers.map(m => (
-                          <option key={m.user_email} value={m.id}>{m.user_fullname}</option>
+                          // Changed from m.id to m.user_id
+                          <option key={m.user_email} value={m.user_id.toString()}>{m.user_fullname}</option>
                         ))}
                       </select>
                     </div>
@@ -354,9 +439,13 @@ export default function BranchManagement() {
                   {error && <div className='p-3 bg-red-50 text-red-600 text-xs font-bold rounded-lg border border-red-100'>{error}</div>}
 
                   <div className='pt-6 flex gap-3'>
-                    <button type='button' onClick={() => setViewMode('view')} className='flex-1 py-3.5 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50'>Cancel</button>
-                    <button type='submit' disabled={isSubmitting} className='flex-1 bg-blue-600 text-white py-3.5 rounded-xl font-bold hover:bg-blue-700 disabled:bg-blue-300 shadow-lg shadow-blue-500/20'>
-                      {isSubmitting ? 'Syncing...' : 'Commit Changes'}
+                    {viewMode === 'edit' ? (
+                      <button type='button' onClick={() => setViewMode('view')} className='flex-1 py-3.5 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors'>Cancel Edit</button>
+                    ) : (
+                      <button type='button' onClick={() => setIsModalOpen(false)} className='flex-1 py-3.5 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors'>Cancel</button>
+                    )}
+                    <button type='submit' disabled={isSubmitting} className='flex-1 bg-blue-600 text-white py-3.5 rounded-xl font-bold hover:bg-blue-700 disabled:bg-blue-300 shadow-lg shadow-blue-500/20 transition-all'>
+                      {isSubmitting ? 'Syncing...' : 'Save Branch'}
                     </button>
                   </div>
                 </form>
