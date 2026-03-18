@@ -6,7 +6,8 @@ import { useRouter, usePathname } from 'next/navigation';
 
 export default function Sidebar() {
   const [role, setRole] = useState('');
-  const [userProfile, setUserProfile] = useState({ name: '', email: '' });
+  const [userProfile, setUserProfile] = useState({ id: null as number | null, name: '', email: '' });
+  const [unreadCount, setUnreadCount] = useState(0); // For isolated notification badge
   const [isMounted, setIsMounted] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
@@ -33,7 +34,7 @@ export default function Sidebar() {
       
       const { data: userData } = await supabase
         .from('users')
-        .select('role_id, user_fullname, user_email')
+        .select('user_id, role_id, user_fullname, user_email')
         .eq('user_email', userEmail)
         .single();
 
@@ -47,8 +48,17 @@ export default function Sidebar() {
         };
         const verifiedRole = roleMapping[userData.role_id] || 'Unknown';
         setRole(verifiedRole);
-        setUserProfile({ name: userData.user_fullname, email: userData.user_email });
+        setUserProfile({ id: userData.user_id, name: userData.user_fullname, email: userData.user_email });
         localStorage.setItem('dialygo-cached-role', verifiedRole);
+        
+        // --- Isolated Notification Check ---
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userData.user_id)
+          .eq('is_read', false);
+        
+        setUnreadCount(count || 0);
       }
     }
 
@@ -60,6 +70,16 @@ export default function Sidebar() {
   if (!isMounted || !role) {
     return <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 min-h-screen flex flex-col'></aside>;
   }
+
+  // Define global links that everyone gets (like Notifications)
+  const sharedLinks = [
+    { 
+      title: 'Notifications', 
+      url: `/${role.toLowerCase()}/notifications`, 
+      icon: '🔔',
+      badge: unreadCount > 0 ? unreadCount : null 
+    }
+  ];
 
   const menuConfig = {
     Admin: [
@@ -91,7 +111,9 @@ export default function Sidebar() {
     ]
   };
 
-  const currentLinks = menuConfig[role as keyof typeof menuConfig] || [];
+  const roleLinks = menuConfig[role as keyof typeof menuConfig] || [];
+  // Combine shared links (Notifications) with role-specific links
+  const currentLinks = [...roleLinks, ...sharedLinks];
 
   const handleLogout = async () => {
     localStorage.removeItem('dialygo-cached-role');
@@ -100,11 +122,11 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col font-sans shadow-2xl'>
+    <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col font-sans shadow-2xl border-r border-white/5'>
       
       <div className='p-6 pb-2'>
         <div className='text-2xl font-black tracking-wider text-blue-500 mb-1 flex items-center gap-2'>
-          <span className='text-3xl'></span> DialyGo
+          DialyGo
         </div>
         <div className='text-[10px] text-slate-400 font-bold tracking-widest uppercase mb-6 ml-1'>
           {role} PORTAL
@@ -118,14 +140,23 @@ export default function Sidebar() {
             <Link 
               key={link.title} 
               href={link.url} 
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all ${
+              className={`group flex items-center justify-between px-4 py-3 rounded-xl font-medium transition-all ${
                 isActive 
                   ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20 shadow-inner' 
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent'
               }`}
             >
-              <span className='text-lg'>{link.icon}</span>
-              <span className='text-sm'>{link.title}</span>
+              <div className='flex items-center gap-3'>
+                <span className='text-lg'>{link.icon}</span>
+                <span className='text-sm'>{link.title}</span>
+              </div>
+              
+              {/* --- The Notification Badge --- */}
+              {link.badge && (
+                <span className='bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-pulse'>
+                  {link.badge}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -142,20 +173,20 @@ export default function Sidebar() {
           </div>
         </div>
         
-      <div className='flex gap-2'>
-        <Link 
-          href={`/${role.toLowerCase()}/settings`} 
-          className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors'
+        <div className='flex gap-2'>
+          <Link 
+            href={`/${role.toLowerCase()}/settings`} 
+            className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors'
           >
-          ⚙️ Settings
-        </Link>
-      <button 
-        onClick={handleLogout}
-        className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-400/10 border border-red-900/30 transition-colors'
-      >
-        Sign Out
-      </button>
-      </div>
+            Settings
+          </Link>
+          <button 
+            onClick={handleLogout}
+            className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-400/10 border border-red-900/30 transition-colors'
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
     </aside>
   );
