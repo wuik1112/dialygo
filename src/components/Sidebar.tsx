@@ -4,10 +4,17 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 
+// Import professional vector icons
+import { 
+  FiBell, FiPieChart, FiMap, FiUsers, FiTool, 
+  FiTrendingUp, FiCalendar, FiClock, FiMonitor, 
+  FiFolder, FiFileText, FiActivity, FiHome
+} from 'react-icons/fi';
+
 export default function Sidebar() {
   const [role, setRole] = useState('');
   const [userProfile, setUserProfile] = useState({ id: null as number | null, name: '', email: '' });
-  const [unreadCount, setUnreadCount] = useState(0); // For isolated notification badge
+  const [unreadCount, setUnreadCount] = useState(0); 
   const [isMounted, setIsMounted] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
@@ -15,23 +22,18 @@ export default function Sidebar() {
   useEffect(() => {
     setIsMounted(true);
     const cachedRole = localStorage.getItem('dialygo-cached-role');
-    if (cachedRole) {
-      setRole(cachedRole);
-    }
+    if (cachedRole) setRole(cachedRole);
 
     async function verifyUserAndFetchProfile() {
       const { data: sessionData } = await supabase.auth.getSession();
       
       if (!sessionData.session) {
         localStorage.removeItem('dialygo-cached-role');
-        if (pathname !== '/') {
-          router.push('/');
-        }
+        if (pathname !== '/') router.push('/');
         return;
       }
 
       const userEmail = sessionData.session.user.email;
-      
       const { data: userData } = await supabase
         .from('users')
         .select('user_id, role_id, user_fullname, user_email')
@@ -40,18 +42,13 @@ export default function Sidebar() {
 
       if (userData) {
         const roleMapping: Record<number, string> = {
-          1: 'Admin',
-          2: 'Manager',
-          3: 'Nephrologist',
-          4: 'Nurse',
-          5: 'Patient'
+          1: 'Admin', 2: 'Manager', 3: 'Nephrologist', 4: 'Nurse', 5: 'Patient'
         };
         const verifiedRole = roleMapping[userData.role_id] || 'Unknown';
         setRole(verifiedRole);
         setUserProfile({ id: userData.user_id, name: userData.user_fullname, email: userData.user_email });
         localStorage.setItem('dialygo-cached-role', verifiedRole);
         
-        // --- Isolated Notification Check ---
         const { count } = await supabase
           .from('notifications')
           .select('*', { count: 'exact', head: true })
@@ -66,53 +63,40 @@ export default function Sidebar() {
   }, [router, pathname]);
 
   if (pathname === '/') return null;
+  if (!isMounted || !role) return <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 min-h-screen flex flex-col'></aside>;
+  if (role === 'Patient') return null;
 
-  if (!isMounted || !role) {
-    return <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 min-h-screen flex flex-col'></aside>;
-  }
-
-  // Define global links that everyone gets (like Notifications)
   const sharedLinks = [
-    { 
-      title: 'Notifications', 
-      url: `/${role.toLowerCase()}/notifications`, 
-      icon: '🔔',
-      badge: unreadCount > 0 ? unreadCount : null 
-    }
+    { title: 'Notifications', url: `/${role.toLowerCase()}/notifications`, icon: FiBell, badge: unreadCount > 0 ? unreadCount : null }
   ];
 
+  // Map the professional icons to the menu items
   const menuConfig = {
     Admin: [
-      { title: 'Network Dashboard', url: '/admin', icon: '📊' },
-      { title: 'Branch Management', url: '/admin/branches', icon: '🏥' },
-      { title: 'User Accounts', url: '/admin/users', icon: '👥' },
-      { title: 'System Rules', url: '/admin/rules', icon: '⚙️' }
+      { title: 'Network Dashboard', url: '/admin', icon: FiPieChart },
+      { title: 'Branch Management', url: '/admin/branches', icon: FiMap },
+      { title: 'User Accounts', url: '/admin/users', icon: FiUsers },
+      { title: 'System Rules', url: '/admin/rules', icon: FiTool }
     ],
     Manager: [
-      { title: 'Branch Dashboard', url: '/manager', icon: '📈' },
-      { title: 'Booking Requests', url: '/manager/bookings', icon: '📅' },
-      { title: 'Staff Roster', url: '/manager/roster', icon: '🧑‍⚕️' },
-      { title: 'Machine Status', url: '/manager/machines', icon: '💉' }
+      { title: 'Branch Dashboard', url: '/manager', icon: FiTrendingUp },
+      { title: 'Booking Requests', url: '/manager/bookings', icon: FiCalendar },
+      { title: 'Staff Roster', url: '/manager/roster', icon: FiClock },
+      { title: 'Machine Status', url: '/manager/machines', icon: FiMonitor }
     ],
     Nephrologist: [
-      { title: 'Patient Directory', url: '/nephrologist', icon: '🗂️' },
-      { title: 'Prescriptions', url: '/nephrologist/prescriptions', icon: '💊' },
-      { title: 'Medical History', url: '/nephrologist/history', icon: '📋' }
+      { title: 'Patient Directory', url: '/nephrologist', icon: FiUsers },
+      { title: 'Prescriptions', url: '/nephrologist/prescriptions', icon: FiFileText },
+      { title: 'Medical History', url: '/nephrologist/history', icon: FiFolder }
     ],
     Nurse: [
-      { title: 'Today Schedule', url: '/nurse', icon: '⏱️' },
-      { title: 'Active Sessions', url: '/nurse/treatments', icon: '🩺' },
-      { title: 'Session Logs', url: '/nurse/logs', icon: '📝' }
-    ],
-    Patient: [
-      { title: 'My Dashboard', url: '/patient', icon: '🏠' },
-      { title: 'Request Booking', url: '/patient/booking', icon: '📅' },
-      { title: 'Medical Documents', url: '/patient/documents', icon: '📁' }
+      { title: 'Today Schedule', url: '/nurse', icon: FiClock },
+      { title: 'Active Sessions', url: '/nurse/treatments', icon: FiActivity },
+      { title: 'Session Logs', url: '/nurse/logs', icon: FiFileText }
     ]
   };
 
   const roleLinks = menuConfig[role as keyof typeof menuConfig] || [];
-  // Combine shared links (Notifications) with role-specific links
   const currentLinks = [...roleLinks, ...sharedLinks];
 
   const handleLogout = async () => {
@@ -123,10 +107,9 @@ export default function Sidebar() {
 
   return (
     <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col font-sans shadow-2xl border-r border-white/5'>
-      
       <div className='p-6 pb-2'>
         <div className='text-2xl font-black tracking-wider text-blue-500 mb-1 flex items-center gap-2'>
-          DialyGo
+          <FiActivity className="text-blue-500" /> DialyGo
         </div>
         <div className='text-[10px] text-slate-400 font-bold tracking-widest uppercase mb-6 ml-1'>
           {role} PORTAL
@@ -147,11 +130,11 @@ export default function Sidebar() {
               }`}
             >
               <div className='flex items-center gap-3'>
-                <span className='text-lg'>{link.icon}</span>
+                {/* Dynamically render the React Icon component */}
+                <link.icon className={`text-lg ${isActive ? 'text-blue-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
                 <span className='text-sm'>{link.title}</span>
               </div>
               
-              {/* --- The Notification Badge --- */}
               {link.badge && (
                 <span className='bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-pulse'>
                   {link.badge}
@@ -174,16 +157,10 @@ export default function Sidebar() {
         </div>
         
         <div className='flex gap-2'>
-          <Link 
-            href={`/${role.toLowerCase()}/settings`} 
-            className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors'
-          >
-            Settings
+          <Link href={`/${role.toLowerCase()}/settings`} className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors'>
+            <FiTool className="mr-1.5" /> Settings
           </Link>
-          <button 
-            onClick={handleLogout}
-            className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-400/10 border border-red-900/30 transition-colors'
-          >
+          <button onClick={handleLogout} className='flex-1 flex items-center justify-center py-2.5 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-400/10 border border-red-900/30 transition-colors'>
             Sign Out
           </button>
         </div>
