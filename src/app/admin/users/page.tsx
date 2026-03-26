@@ -52,7 +52,6 @@ export default function UserManagement() {
 
   async function fetchData() {
     setIsLoading(true);
-    // Fetch users with their linked patient and staff profiles
     const [usersRes, branchesRes] = await Promise.all([
       supabase.from('users').select('*, patients(*), staff(*)').order('user_id', { ascending: false }),
       supabase.from('branches').select('id, branch_name')
@@ -150,21 +149,46 @@ export default function UserManagement() {
       branch_id: formData.branch_id ? parseInt(formData.branch_id) : null
     };
 
-    if (formData.password.trim()) {
-      userPayload.user_password = formData.password; 
-    }
+    // SECURITY FIX: Plain text passwords are no longer attached to userPayload!
 
     try {
       let targetUserId = editingId;
 
       // 1. Process User Table
       if (editingId) {
+        
+        // --- SECURE AUTH UPDATE ---
+        if (formData.password.trim()) {
+          const authRes = await fetch('/api/admin/update-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: formData.email.trim(), password: formData.password.trim() })
+          });
+          if (!authRes.ok) throw new Error("Failed to update password in secure auth.");
+        }
+
         const { error: updateError } = await supabase.from('users').update(userPayload).eq('user_id', editingId);
         if (updateError) throw updateError;
+        
       } else {
+        
+        // --- SECURE AUTH CREATION ---
         if (!formData.password) throw new Error('Password is required for new users.');
         userPayload.user_is_active = true; 
 
+        // 1. Safely create user in Supabase Auth via our backend
+        const authRes = await fetch('/api/admin/create-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email.trim(), password: formData.password.trim() })
+        });
+        
+        if (!authRes.ok) {
+          const errData = await authRes.json();
+          throw new Error(errData.error || "Failed to create user in secure auth. Ensure password is > 6 characters.");
+        }
+
+        // 2. Safely create the public profile record (NO password stored here)
         const { data: newUser, error: insertError } = await supabase.from('users').insert([userPayload]).select();
         if (insertError) throw insertError;
         targetUserId = newUser[0].user_id;
@@ -172,13 +196,11 @@ export default function UserManagement() {
 
       // 2. Process Extended Tables (Staff or Patients)
       if (roleIdNum === 5) {
-        // Patient Role
         const patientPayload = {
           user_id: targetUserId,
           home_branch_id: formData.branch_id ? parseInt(formData.branch_id) : null,
           patient_address: formData.patient_address.trim() || null,
           patient_blood_type: formData.blood_type || null
-          // Notice: We strictly omit Hepatitis data here to prevent Admin overwriting clinical records
         };
 
         const existingUser = users.find(u => u.user_id === targetUserId);
@@ -193,7 +215,6 @@ export default function UserManagement() {
         }
 
       } else {
-        // Staff Roles (1, 2, 3, 4)
         const staffPayload = {
           user_id: targetUserId,
           professional_license_number: formData.license_number.trim() || null,
@@ -214,7 +235,7 @@ export default function UserManagement() {
       }
 
       if (!editingId) {
-        alert("System simulated action: Sent automated account activation email.\n\nUser account created successfully.");
+        alert("Account securely created! They can now log in via the Supabase Auth system.");
       }
 
       setIsModalOpen(false);

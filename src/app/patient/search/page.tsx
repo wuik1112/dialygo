@@ -279,11 +279,40 @@ export default function PatientSearchBooking() {
     setSelectedSessions(selectedSessions.filter(s => s.date !== dateToRemove));
   };
 
-  // --- FINAL SUBMIT LOGIC ---
   const handleFinalSubmit = async () => {
     if (selectedSessions.length === 0) return; 
     setIsSubmitting(true);
+    
     try {
+      // 1. Define maxCapacity inside this function's scope
+      const maxCapacity = selectedBranch.available_slots > 0 ? selectedBranch.available_slots : selectedBranch.total_machines || 8;
+
+      // 2. Loop through each session in the cart to validate capacity right before insertion
+      for (const session of selectedSessions) {
+        // Extract just 'Morning' or 'Afternoon' to match your database format reliably
+        const shiftKeyword = session.shift.includes('Morning') ? 'Morning' : 'Afternoon';
+
+        const { data: existingBookings, error: checkError } = await supabase
+          .from('bookings')
+          .select('id')
+          .eq('branch_id', selectedBranch.id)
+          .eq('booking_date', session.date)
+          .like('booking_session_time', `%${shiftKeyword}%`)
+          .neq('booking_status', 'Cancelled');
+
+        if (checkError) throw checkError;
+
+        // 3. Fix the "possibly 'null'" TypeScript error
+        const currentBookingsCount = existingBookings ? existingBookings.length : 0;
+
+        if (currentBookingsCount >= maxCapacity) {
+          alert(`Sorry, the ${shiftKeyword} slot for ${session.date} was just taken by another user. Please remove it from your cart and select another date.`);
+          setIsSubmitting(false); 
+          return; // Abort the submission
+        }
+      }
+
+      // 4. If all validations pass, execute the batch insert
       const inserts = selectedSessions.map(session => ({
         patient_id: patientId,
         branch_id: selectedBranch.id,
@@ -295,9 +324,10 @@ export default function PatientSearchBooking() {
 
       const { error } = await supabase.from('bookings').insert(inserts);
       if (error) throw error;
+      
       setShowSuccessDialog(true);
-    } catch (err) { 
-      alert("Failed to submit request."); 
+    } catch (err: any) { 
+      alert(`Failed to submit request: ${err.message || "Unknown error"}`); 
     } finally { 
       setIsSubmitting(false); 
     }

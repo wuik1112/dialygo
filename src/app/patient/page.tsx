@@ -6,7 +6,7 @@ import PatientBottomNav from '../../components/PatientBottomNav';
 
 import { 
   FiMapPin, FiCalendar, FiClock, FiChevronLeft, FiChevronRight,
-  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX
+  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiXCircle
 } from 'react-icons/fi';
 
 export default function PatientHome() {
@@ -61,7 +61,6 @@ export default function PatientHome() {
     loadDashboard();
   }, [router]);
 
-  // --- FILTERING & ELDERLY-FRIENDLY SORTING LOGIC ---
   const activeBookings = bookings.filter(b => b.booking_type === activeTab);
   
   const monthBookings = activeBookings.filter(b => {
@@ -95,7 +94,8 @@ export default function PatientHome() {
   const nextMonth = () => { setSelectedDate(null); setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1)); };
 
   const getStatusStyle = (status: string) => {
-    if (status === 'Cancelled') return { bg: 'bg-slate-200', text: 'text-slate-500', border: 'border-slate-300' };
+    if (status === 'Cancelled' || status === 'Expired') return { bg: 'bg-slate-200', text: 'text-slate-500', border: 'border-slate-300' };
+    if (status?.includes('Rejected')) return { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-400' };
     if (status?.includes('Reschedule')) return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-400' };
     if (status === 'Completed') return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-400' };
     if (status === 'Confirmed') return { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-400' };
@@ -107,10 +107,10 @@ export default function PatientHome() {
     if (!cancelDialogTarget || !cancelReason.trim()) return;
     setIsProcessing(true);
     try {
-      await supabase.from('requests').insert([{ request_type: 'Cancel', booking_id: cancelDialogTarget.id, request_reason: cancelReason, request_status: 'APPROVED' }]);
-      const { error } = await supabase.from('bookings').update({ booking_status: 'Cancelled' }).eq('id', cancelDialogTarget.id);
+      await supabase.from('requests').insert([{ request_type: 'Cancel', booking_id: cancelDialogTarget.id, request_reason: cancelReason, request_status: 'PENDING' }]);
+      const { error } = await supabase.from('bookings').update({ booking_status: 'Pending Cancellation' }).eq('id', cancelDialogTarget.id);
       if (error) throw error;
-      setBookings(prev => prev.map(b => b.id === cancelDialogTarget.id ? { ...b, booking_status: 'Cancelled' } : b));
+      setBookings(prev => prev.map(b => b.id === cancelDialogTarget.id ? { ...b, booking_status: 'Pending Cancellation' } : b));
       setCancelDialogTarget(null); setDetailViewTarget(null); setCancelReason('');
     } catch (error) { alert("Failed to cancel booking."); } finally { setIsProcessing(false); }
   };
@@ -159,8 +159,37 @@ export default function PatientHome() {
   const generateTimelineSteps = (status: string) => {
     if (status === 'Cancelled') {
       return [
+        { title: 'Cancellation Requested', desc: 'Reason submitted to clinic', state: 'completed' },
+        { title: 'Manager Review', desc: 'Clinic acknowledged request', state: 'completed' },
+        { title: 'Cancellation Confirmed', desc: 'Session officially removed', state: 'error' } 
+      ];
+    }
+    if (status === 'Pending Cancellation') {
+      return [
+        { title: 'Cancellation Requested', desc: 'Reason submitted to system', state: 'completed' },
+        { title: 'Manager Review', desc: 'Pending clinic acknowledgment', state: 'active' },
+        { title: 'Cancellation Confirmed', desc: 'Awaiting approval', state: 'pending' }
+      ];
+    }
+    if (status === 'Cancellation Rejected') {
+      return [
+        { title: 'Cancellation Requested', desc: 'Reason submitted to system', state: 'completed' },
+        { title: 'Manager Review', desc: 'Request declined by clinic', state: 'error' },
+        { title: 'Appointment Active', desc: 'Please attend your original session', state: 'active' }
+      ];
+    }
+    if (status === 'Reschedule Rejected') {
+      return [
+        { title: 'Reschedule Requested', desc: 'New date submitted', state: 'completed' },
+        { title: 'Manager Review', desc: 'Request declined by clinic', state: 'error' },
+        { title: 'Original Date Active', desc: 'Original schedule maintained', state: 'active' }
+      ];
+    }
+    if (status === 'Rejected') {
+      return [
         { title: 'Request Submitted', desc: 'Booking received by system', state: 'completed' },
-        { title: 'Booking Cancelled', desc: 'This session has been voided', state: 'error' }
+        { title: 'Manager Review', desc: 'Request declined due to capacity/clinical issues', state: 'error' },
+        { title: 'Voided', desc: 'Booking closed', state: 'error' }
       ];
     }
     if (status?.includes('Reschedule')) {
@@ -177,7 +206,6 @@ export default function PatientHome() {
         { title: 'Confirmed', desc: 'Schedule locked in', state: 'pending' }
       ];
     }
-    // Confirmed or Completed
     return [
       { title: 'Request Submitted', desc: 'Booking received by system', state: 'completed' },
       { title: 'Manager Review', desc: 'Documents and slots verified', state: 'completed' },
@@ -191,18 +219,17 @@ export default function PatientHome() {
     const isCancelled = booking.booking_status === 'Cancelled';
     const isReschedule = booking.booking_status?.includes('Reschedule');
     const isPending = booking.booking_status?.includes('Pending');
+    const isRejected = booking.booking_status?.includes('Rejected');
     const style = getStatusStyle(booking.booking_status);
     const displayDay = bDate.toLocaleDateString('en-GB', { weekday: 'short' });
 
     let isNextSession = false;
-    if (!isPast && !isCancelled && !nextSessionFound) {
+    if (!isPast && !isCancelled && !isRejected && !nextSessionFound) {
       isNextSession = true;
       nextSessionFound = true; 
     }
 
-    // NEW LOGIC: Only show detail button for Travel, Cancelled, Rescheduled, or Pending requests
-    const isTravel = activeTab === 'Travel';
-    const showDetailButton = isTravel || isCancelled || isReschedule || isPending;
+    const showDetailButton = true; // Always let them view the timeline
 
     return (
       <div className={`bg-white rounded-2xl p-5 border shadow-sm relative overflow-hidden transition-all ${isNextSession ? 'border-blue-400 shadow-md ring-2 ring-blue-100' : isPast || isCancelled ? 'border-slate-100 opacity-75' : 'border-slate-200'}`}>
@@ -236,7 +263,7 @@ export default function PatientHome() {
         </div>
 
         <div className='flex gap-2 border-t border-slate-100 pt-3'>
-          {!isPast && !isCancelled && !isReschedule && !isPending && (
+          {!isPast && !isCancelled && !isReschedule && !isPending && !isRejected && (
             <>
               <button onClick={() => setRescheduleTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-blue-200 text-blue-600 hover:bg-blue-50'>Reschedule</button>
               <button onClick={() => setCancelDialogTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50'>Cancel</button>
@@ -245,19 +272,13 @@ export default function PatientHome() {
           
           {showDetailButton && (
             <button onClick={() => setDetailViewTarget(booking)} className={`flex-1 py-3 rounded-xl text-xs font-bold shadow-md ${isPast || isCancelled ? 'bg-slate-100 text-slate-600 shadow-none' : 'bg-blue-600 text-white'}`}>
-              {isTravel ? 'Track Status' : 'View Detail'}
+              {booking.booking_type === 'Travel' ? 'Track Status' : 'View Detail'}
             </button>
           )}
         </div>
       </div>
     );
   };
-
-  // Determine if the timeline should be shown for the selected detail target
-  const showTimeline = detailViewTarget?.booking_type === 'Travel' || 
-                       detailViewTarget?.booking_status === 'Cancelled' || 
-                       detailViewTarget?.booking_status?.includes('Reschedule') ||
-                       detailViewTarget?.booking_status?.includes('Pending');
 
   return (
     <div className='max-w-md mx-auto bg-slate-50 h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
@@ -272,7 +293,6 @@ export default function PatientHome() {
               <button onClick={() => {setActiveTab('Travel'); setSelectedDate(null);}} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'Travel' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Travel</button>
             </div>
 
-            {/* --- CALENDAR COMPONENT --- */}
             <div className='bg-white border border-slate-100 rounded-2xl p-4 shadow-sm mb-2'>
               <div className='flex justify-between items-center mb-4'>
                 <button onClick={prevMonth} className='p-2 hover:bg-slate-100 rounded-full text-slate-600'><FiChevronLeft className='text-xl' /></button>
@@ -381,41 +401,38 @@ export default function PatientHome() {
             </div>
 
             {/* --- SMART CONDITIONAL STATUS TRACKER TIMELINE --- */}
-            {showTimeline && (
-              <div className='bg-white rounded-2xl p-5 shadow-sm border border-slate-100'>
-                <h3 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-5'>Request Status</h3>
-                
-                <div className='relative ml-2'>
-                  <div className='absolute left-[11px] top-2 bottom-6 w-0.5 bg-slate-100'></div>
+            <div className='bg-white rounded-2xl p-5 shadow-sm border border-slate-100'>
+              <h3 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-5'>Request Status</h3>
+              
+              <div className='relative ml-2'>
+                <div className='absolute left-[11px] top-2 bottom-6 w-0.5 bg-slate-100'></div>
 
-                  <div className='space-y-6'>
-                    {generateTimelineSteps(detailViewTarget.booking_status).map((step, idx) => (
-                      <div key={idx} className='relative flex gap-4 items-start'>
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 border-2 ${
-                          step.state === 'completed' ? 'bg-emerald-500 border-emerald-500 text-white' : 
-                          step.state === 'active' ? 'bg-amber-100 border-amber-500 text-amber-600' :
-                          step.state === 'error' ? 'bg-red-500 border-red-500 text-white' :
-                          'bg-white border-slate-200 text-slate-300'
-                        }`}>
-                          {step.state === 'completed' && <FiCheckCircle className='text-xs' />}
-                          {step.state === 'active' && <FiMoreVertical className='text-xs animate-pulse' />}
-                          {step.state === 'error' && <FiX className='text-xs' />}
-                        </div>
-                        <div className='pb-1'>
-                          <h4 className={`text-sm font-black ${step.state === 'active' ? 'text-amber-700' : step.state === 'error' ? 'text-red-700' : 'text-slate-800'}`}>
-                            {step.title}
-                          </h4>
-                          <p className='text-xs font-bold text-slate-500 mt-0.5 leading-snug'>{step.desc}</p>
-                        </div>
+                <div className='space-y-6'>
+                  {generateTimelineSteps(detailViewTarget.booking_status).map((step, idx) => (
+                    <div key={idx} className='relative flex gap-4 items-start'>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 border-2 ${
+                        step.state === 'completed' ? 'bg-emerald-500 border-emerald-500 text-white' : 
+                        step.state === 'active' ? 'bg-amber-100 border-amber-500 text-amber-600' :
+                        step.state === 'error' ? 'bg-red-500 border-red-500 text-white' :
+                        'bg-white border-slate-200 text-slate-300'
+                      }`}>
+                        {step.state === 'completed' && <FiCheckCircle className='text-xs' />}
+                        {step.state === 'active' && <FiMoreVertical className='text-xs animate-pulse' />}
+                        {step.state === 'error' && <FiX className='text-xs' />}
                       </div>
-                    ))}
-                  </div>
+                      <div className='pb-1'>
+                        <h4 className={`text-sm font-black ${step.state === 'active' ? 'text-amber-700' : step.state === 'error' ? 'text-red-700' : 'text-slate-800'}`}>
+                          {step.title}
+                        </h4>
+                        <p className='text-xs font-bold text-slate-500 mt-0.5 leading-snug'>{step.desc}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* ACTION BUTTONS (Only if active/pending) */}
-            {new Date(detailViewTarget.booking_date) >= today && detailViewTarget.booking_status !== 'Cancelled' && (
+            {new Date(detailViewTarget.booking_date) >= today && detailViewTarget.booking_status !== 'Cancelled' && detailViewTarget.booking_status !== 'Rejected' && (
               <div className='flex gap-3 pt-2'>
                 <button onClick={() => setRescheduleTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 bg-white hover:bg-slate-50'>Reschedule</button>
                 <button onClick={() => setCancelDialogTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-red-100 text-red-600 bg-red-50 hover:bg-red-100'>Cancel</button>
@@ -450,7 +467,6 @@ export default function PatientHome() {
               <div className='p-4 bg-amber-50 border border-amber-100 rounded-2xl'>
                 <label className='block text-xs font-black text-amber-800 uppercase tracking-widest mb-2'>Select New Date</label>
                 <input type="date" required min={minRescheduleDate} max={maxRescheduleDate} value={newDate} onChange={e => setNewDate(e.target.value)} className='w-full p-3.5 bg-white border border-amber-200 rounded-xl outline-none focus:border-amber-500 font-bold text-slate-800 text-sm' />
-                <p className='text-[10px] font-bold text-amber-600 mt-2 opacity-80'>*Clinical Safety Rule: Rescheduling is strictly limited to 1 day before or after your original slot to prevent dangerous fluid accumulation.</p>
               </div>
 
               <div>

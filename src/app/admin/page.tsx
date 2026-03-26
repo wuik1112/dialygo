@@ -13,7 +13,7 @@ export default function AdminDashboard() {
         // 1. Fetch all required tables
         const [branchesRes, bookingsRes, patientsRes, usersRes] = await Promise.all([
           supabase.from('branches').select('*').eq('status', 'Active'),
-          supabase.from('bookings').select('booking_date, shift_time, branch_id, patient_id, status'),
+          supabase.from('bookings').select('booking_date, booking_session_time, branch_id, patient_id, booking_status'),
           supabase.from('patients').select('user_id, home_branch_id'),
           supabase.from('users').select('user_id, role_id, user_is_active')
         ]);
@@ -47,7 +47,7 @@ export default function AdminDashboard() {
         // 4. Calculate Popular Session Times (Updated for True Bar Chart)
         let morning = 0, afternoon = 0, evening = 0;
         bookings.forEach(b => {
-          const shift = b.shift_time?.toLowerCase();
+          const shift = b.booking_session_time?.toLowerCase();
           if (shift === 'morning') morning++;
           else if (shift === 'afternoon') afternoon++;
           else if (shift === 'evening') evening++;
