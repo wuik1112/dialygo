@@ -8,7 +8,7 @@ import {
   FiUser, FiPhone, FiMapPin, FiDroplet, FiLogOut, 
   FiAlertCircle, FiCheckCircle, FiFileText, FiHome,
   FiMail, FiCalendar, FiActivity, FiEye, FiEyeOff, 
-  FiUploadCloud, FiFile, FiClock, FiX
+  FiFile, FiClock, FiX, FiShield, FiPhoneCall, FiLock, FiHelpCircle, FiEdit2
 } from 'react-icons/fi';
 import { FaWheelchair, FaWalking } from 'react-icons/fa';
 
@@ -18,10 +18,16 @@ export default function PatientProfile() {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showIC, setShowIC] = useState(false);
   
-  // Real Upload States
-  const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
-  const [referralStatus, setReferralStatus] = useState<'Missing' | 'Pending Review' | 'Verified'>('Missing');
+  // Document View State
   const [showDocViewer, setShowDocViewer] = useState<{title: string, url: string} | null>(null);
+
+  // Emergency Contact Edit States
+  const [showEditEmergency, setShowEditEmergency] = useState(false);
+  const [editEmName, setEditEmName] = useState('');
+  const [editEmRel, setEditEmRel] = useState('');
+  const [editEmPhone, setEditEmPhone] = useState('');
+  const [isUpdatingEm, setIsUpdatingEm] = useState(false);
+  const [emErrorMsg, setEmErrorMsg] = useState('');
 
   const router = useRouter();
 
@@ -43,8 +49,6 @@ export default function PatientProfile() {
             .single();
             
           setProfileData({ ...user, ...patient });
-          // Check if referral exists to set initial status
-          if (patient.referral_letter_url) setReferralStatus('Pending Review');
         }
       } catch (err) {
         console.error("Failed to load profile:", err);
@@ -60,48 +64,52 @@ export default function PatientProfile() {
     router.push('/');
   };
 
-  // --- REAL SUPABASE STORAGE UPLOAD ---
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, docType: 'Serology' | 'Referral') => {
-    const file = event.target.files?.[0];
-    if (!file || !profileData?.patient_id) return;
+  const openEmergencyEdit = () => {
+    setEditEmName(profileData?.emergency_contact_name || '');
+    setEditEmRel(profileData?.emergency_contact_relationship || '');
+    setEditEmPhone(profileData?.emergency_contact_number || '');
+    setShowEditEmergency(true);
+  };
 
-    setUploadingDoc(docType);
+  const handleUpdateEmergencyContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmErrorMsg('');
+
+    // 1. Name Validation: Only letters and spaces, min 3 chars
+    const nameRegex = /^[A-Za-z\s]+$/;
+    if (!nameRegex.test(editEmName) || editEmName.trim().length < 3) {
+      setEmErrorMsg("Name must contain only letters and be at least 3 characters long.");
+      return;
+    }
+
+    // 2. Phone Validation: Remove spaces/hyphens, check for 10-15 digits
+    const cleanPhone = editEmPhone.replace(/[\s-]/g, '');
+    if (!/^\+?[0-9]{10,15}$/.test(cleanPhone)) {
+      setEmErrorMsg("Please enter a valid phone number (10 to 15 digits number).");
+      return;
+    }
+
+    setIsUpdatingEm(true);
     try {
-      // 1. Generate a unique file name to avoid overwriting
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${profileData.patient_id}-${docType}-${Date.now()}.${fileExt}`;
-      
-      // 2. Upload to Supabase 'patient_documents' bucket
-      const { error: uploadError } = await supabase.storage
-        .from('patient_documents')
-        .upload(fileName, file);
+      const { error } = await supabase.from('patients').update({
+          emergency_contact_name: editEmName.trim(),
+          emergency_contact_relationship: editEmRel,
+          emergency_contact_number: editEmPhone.trim()
+        }).eq('patient_id', profileData.patient_id);
 
-      if (uploadError) throw uploadError;
+      if (error) throw error;
 
-      // 3. Get the public URL of the uploaded file
-      const { data: { publicUrl } } = supabase.storage
-        .from('patient_documents')
-        .getPublicUrl(fileName);
-
-      // 4. Save the URL to the patient's database record
-      const updateColumn = docType === 'Serology' ? 'serology_report_url' : 'referral_letter_url';
-      const { error: dbError } = await supabase
-        .from('patients')
-        .update({ [updateColumn]: publicUrl })
-        .eq('patient_id', profileData.patient_id);
-
-      if (dbError) throw dbError;
-
-      // 5. Update local UI state
-      setProfileData((prev: any) => ({ ...prev, [updateColumn]: publicUrl }));
-      if (docType === 'Referral') setReferralStatus('Pending Review');
-      
-      alert(`${docType} document successfully uploaded!`);
+      setProfileData((prev: any) => ({
+        ...prev,
+        emergency_contact_name: editEmName.trim(),
+        emergency_contact_relationship: editEmRel,
+        emergency_contact_number: editEmPhone.trim()
+      }));
+      setShowEditEmergency(false);
     } catch (error) {
-      console.error("Error uploading document:", error);
-      alert("Failed to upload document. Please try again.");
+      setEmErrorMsg("Failed to update emergency contact. Please try again.");
     } finally {
-      setUploadingDoc(null);
+      setIsUpdatingEm(false);
     }
   };
 
@@ -119,8 +127,8 @@ export default function PatientProfile() {
     );
   }
 
-  // --- CALCULATIONS ---
-  let isSerologyValid = false;
+  // --- STRICT BINARY CLINICAL CALCULATIONS ---
+  let isSerologyValidDate = false;
   let serologyStatusText = "No Record";
   
   if (profileData?.last_serology_date) {
@@ -128,11 +136,13 @@ export default function PatientProfile() {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     
-    isSerologyValid = serologyDate >= sixMonthsAgo;
+    isSerologyValidDate = serologyDate >= sixMonthsAgo;
     serologyStatusText = `Last test: ${serologyDate.toLocaleDateString('en-GB')}`;
   }
 
-  const isEligibleToTravel = profileData?.travel_status === 'Active' && isSerologyValid && referralStatus !== 'Missing';
+  const hasSerologyDoc = !!profileData?.serology_report_url;
+  const hasReferralDoc = !!profileData?.referral_letter_url;
+  const isEligibleToTravel = profileData?.travel_status === 'Active' && isSerologyValidDate && hasSerologyDoc && hasReferralDoc;
 
   let ageStr = '-';
   if (profileData?.user_date_of_birth) {
@@ -145,7 +155,7 @@ export default function PatientProfile() {
   return (
     <div className='max-w-md mx-auto bg-slate-50 h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
       
-      {/* HEADER OVERLAY */}
+      {/* 1. HEADER OVERLAY */}
       <div className='bg-white px-5 pt-12 pb-6 shadow-sm z-10 shrink-0 flex items-center gap-4'>
         <div className='w-16 h-16 rounded-full bg-slate-200 overflow-hidden border-2 border-slate-100 flex-shrink-0'>
           {profileData?.user_profile_photo ? (
@@ -169,7 +179,7 @@ export default function PatientProfile() {
 
       <div className='flex-1 overflow-y-auto p-5 pb-24 space-y-6 custom-scrollbar'>
         
-        {/* TRAVEL ELIGIBILITY & DOCUMENT WARNING */}
+        {/* 2. TRAVEL ELIGIBILITY & DOCUMENTS */}
         <div className={`p-5 rounded-2xl border-2 ${isEligibleToTravel ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
           <div className='flex items-center gap-2 mb-3'>
             {isEligibleToTravel ? <FiCheckCircle className='text-emerald-600 text-xl' /> : <FiAlertCircle className='text-red-600 text-xl' />}
@@ -180,100 +190,133 @@ export default function PatientProfile() {
           
           <div className='bg-white rounded-xl p-4 shadow-sm mb-3'>
             <div className='flex justify-between items-center mb-1'>
-              <span className='text-xs font-bold text-slate-500'>Serology Status</span>
-              <span className={`text-xs font-black uppercase px-2 py-0.5 rounded-md ${isSerologyValid ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                {isSerologyValid ? 'VALID' : 'EXPIRED'}
+              <span className='text-xs font-bold text-slate-500'>Serology Expiry Status</span>
+              <span className={`text-xs font-black uppercase px-2 py-0.5 rounded-md ${isSerologyValidDate ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                {isSerologyValidDate ? 'VALID' : 'EXPIRED'}
               </span>
             </div>
             <p className='text-sm font-bold text-slate-800'>{serologyStatusText}</p>
           </div>
 
-          {!isSerologyValid && (
+          {!isSerologyValidDate && (
             <div className='bg-red-600 text-white p-4 rounded-xl shadow-md mb-3'>
               <p className='text-sm font-bold leading-snug'>Your Serology blood test has expired (Valid for 6 months only).</p>
             </div>
           )}
 
-          {referralStatus === 'Missing' && (
-            <div className='bg-amber-100 text-amber-900 p-4 rounded-xl shadow-sm'>
-              <p className='text-sm font-bold leading-snug'>Doctor's Referral Letter missing.</p>
-              <p className='text-xs font-medium mt-1'>Please upload it below to enable travel booking.</p>
+          {(!hasSerologyDoc || !hasReferralDoc) && (
+            <div className='bg-amber-100 text-amber-900 p-4 rounded-xl shadow-sm mb-3'>
+              <p className='text-sm font-bold leading-snug'>Clinical Documents Missing.</p>
+              <p className='text-xs font-medium mt-1'>Your Home Centre Nurse must upload your clinical documents before you can book travel.</p>
             </div>
           )}
 
           {isEligibleToTravel && (
-            <p className='text-sm font-bold text-emerald-700'>You are currently eligible to book travel dialysis sessions.</p>
+            <p className='text-sm font-bold text-emerald-700 mb-3'>All clinical requirements met. You are eligible to travel.</p>
           )}
-        </div>
 
-        {/* MEDICAL DOCUMENTS SECTION */}
-        <div>
-          <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 pl-1'>Medical Documents</h2>
-          <div className='bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden p-2 space-y-2'>
-            
-            {/* SEROLOGY REPORT DOC */}
-            <div className='p-3 border border-slate-100 rounded-xl flex items-center justify-between bg-slate-50'>
-              <div className='flex items-center gap-3'>
-                <div className={`p-2.5 rounded-lg ${profileData?.serology_report_url ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-                  <FiFileText className='text-xl' />
-                </div>
-                <div>
-                  <h4 className='text-sm font-black text-slate-800'>Serology Report</h4>
-                  <p className={`text-[10px] font-bold uppercase flex items-center gap-1 ${profileData?.serology_report_url ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {profileData?.serology_report_url ? <><FiCheckCircle /> Uploaded</> : <><FiAlertCircle /> Required</>}
-                  </p>
-                </div>
+          {/* Attached Documents */}
+          <div className='border-t border-black/5 pt-3 mt-3 space-y-2'>
+            <h3 className='text-[10px] font-black uppercase tracking-widest opacity-60 mb-2'>Attached Files</h3>
+            <div className='flex items-center justify-between bg-white/50 p-2.5 rounded-lg border border-black/5'>
+              <div className='flex items-center gap-2'>
+                <FiFileText className={hasSerologyDoc ? 'text-emerald-600' : 'text-slate-400'} />
+                <span className='text-xs font-bold text-slate-700'>Serology Report</span>
               </div>
-              
-              {profileData?.serology_report_url ? (
-                <button onClick={() => setShowDocViewer({title: 'Serology Report', url: profileData.serology_report_url})} className='p-2 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg shadow-sm'>
-                  <FiEye />
-                </button>
+              {hasSerologyDoc ? (
+                <button onClick={() => setShowDocViewer({title: 'Serology Report', url: profileData.serology_report_url})} className='text-blue-600 text-xs font-bold hover:underline'>View</button>
               ) : (
-                <div className="relative overflow-hidden inline-block">
-                  <button disabled={uploadingDoc === 'Serology'} className='px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm disabled:opacity-50 flex items-center gap-1.5'>
-                    {uploadingDoc === 'Serology' ? <span className='animate-pulse'>Uploading...</span> : <><FiUploadCloud /> Upload</>}
-                  </button>
-                  <input type="file" accept=".pdf,image/*" onChange={(e) => handleFileUpload(e, 'Serology')} className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer" />
-                </div>
+                <span className='text-[10px] font-bold text-red-500'>Missing</span>
               )}
             </div>
-
-            {/* DOCTOR'S REFERRAL DOC */}
-            <div className='p-3 border border-slate-100 rounded-xl flex items-center justify-between bg-slate-50'>
-              <div className='flex items-center gap-3'>
-                <div className={`p-2.5 rounded-lg ${referralStatus === 'Verified' ? 'bg-emerald-100 text-emerald-600' : referralStatus === 'Pending Review' ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'}`}>
-                  <FiFile className='text-xl' />
-                </div>
-                <div>
-                  <h4 className='text-sm font-black text-slate-800'>Doctor's Referral</h4>
-                  <p className={`text-[10px] font-bold uppercase flex items-center gap-1 ${referralStatus === 'Verified' ? 'text-emerald-600' : referralStatus === 'Pending Review' ? 'text-amber-600' : 'text-slate-400'}`}>
-                    {referralStatus === 'Verified' && <><FiCheckCircle /> Verified</>}
-                    {referralStatus === 'Pending Review' && <><FiClock /> Pending Review</>}
-                    {referralStatus === 'Missing' && 'Not Uploaded'}
-                  </p>
-                </div>
+            <div className='flex items-center justify-between bg-white/50 p-2.5 rounded-lg border border-black/5'>
+              <div className='flex items-center gap-2'>
+                <FiFile className={hasReferralDoc ? 'text-emerald-600' : 'text-slate-400'} />
+                <span className='text-xs font-bold text-slate-700'>Doctor's Referral</span>
               </div>
-              
-              {profileData?.referral_letter_url ? (
-                <button onClick={() => setShowDocViewer({title: "Doctor's Referral", url: profileData.referral_letter_url})} className='p-2 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg shadow-sm'>
-                  <FiEye />
-                </button>
+              {hasReferralDoc ? (
+                <button onClick={() => setShowDocViewer({title: "Doctor's Referral", url: profileData.referral_letter_url})} className='text-blue-600 text-xs font-bold hover:underline'>View</button>
               ) : (
-                <div className="relative overflow-hidden inline-block">
-                  <button disabled={uploadingDoc === 'Referral'} className='px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm disabled:opacity-50 flex items-center gap-1.5'>
-                    {uploadingDoc === 'Referral' ? <span className='animate-pulse'>Uploading...</span> : <><FiUploadCloud /> Upload</>}
-                  </button>
-                  <input type="file" accept=".pdf,image/*" onChange={(e) => handleFileUpload(e, 'Referral')} className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer" />
-                </div>
+                <span className='text-[10px] font-bold text-red-500'>Missing</span>
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* 3. CONTACT & DEMOGRAPHICS */}
+        <div>
+          <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 pl-1'>Contact & Demographics</h2>
+          <div className='bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden'>
+            
+            <div className='p-4 border-b border-slate-50 flex items-start gap-3'>
+              <div className='p-2 bg-slate-100 text-slate-600 rounded-lg'><FiHome className='text-lg' /></div>
+              <div>
+                <p className='text-xs font-bold text-slate-400'>Home Centre</p>
+                <p className='text-sm font-black text-slate-800'>{profileData?.branches?.branch_name || 'Not Assigned'}</p>
+              </div>
+            </div>
+
+            <div className='p-4 border-b border-slate-50 flex items-start gap-3'>
+              <div className='p-2 bg-slate-100 text-slate-600 rounded-lg'><FiCalendar className='text-lg' /></div>
+              <div>
+                <p className='text-xs font-bold text-slate-400'>Date of Birth / Gender</p>
+                <p className='text-sm font-black text-slate-800'>
+                  {profileData?.user_date_of_birth ? new Date(profileData.user_date_of_birth).toLocaleDateString('en-GB') : '-'} 
+                  <span className='text-slate-400 font-medium'> ({ageStr}) • {profileData?.user_gender || '-'}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className='p-4 border-b border-slate-50 flex items-start gap-3'>
+              <div className='p-2 bg-slate-100 text-slate-600 rounded-lg'><FiPhone className='text-lg' /></div>
+              <div>
+                <p className='text-xs font-bold text-slate-400'>Contact Number</p>
+                <p className='text-sm font-black text-slate-800'>{profileData?.user_contact_number || '-'}</p>
+              </div>
+            </div>
+
+            <div className='p-4 border-b border-slate-50 flex items-start gap-3'>
+              <div className='p-2 bg-slate-100 text-slate-600 rounded-lg'><FiMail className='text-lg' /></div>
+              <div className='break-all'>
+                <p className='text-xs font-bold text-slate-400'>Email Address</p>
+                <p className='text-sm font-black text-slate-800'>{profileData?.user_email || '-'}</p>
+              </div>
+            </div>
+
+            <div className='p-4 flex items-start gap-3'>
+              <div className='p-2 bg-slate-100 text-slate-600 rounded-lg'><FiMapPin className='text-lg' /></div>
+              <div>
+                <p className='text-xs font-bold text-slate-400'>Home Address</p>
+                <p className='text-sm font-black text-slate-800 leading-snug'>{profileData?.patient_address || '-'}</p>
+              </div>
             </div>
 
           </div>
-          <p className='text-[10px] font-medium text-slate-400 mt-2 pl-1'>*Accepts PDFs or Images. Documents must be verified by the Head Nurse.</p>
         </div>
 
-        {/* CLINICAL DIALYSIS PROFILE */}
+        {/* 4. EMERGENCY CONTACT */}
+        <div>
+          <div className='flex justify-between items-end mb-3 pl-1 pr-2'>
+            <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest'>Emergency Contact</h2>
+            <button onClick={openEmergencyEdit} className='text-[10px] font-bold text-blue-600 flex items-center gap-1 hover:underline'>
+              <FiEdit2 /> Edit
+            </button>
+          </div>
+          <div className='bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden'>
+            <div className='p-4 flex items-start gap-3 bg-red-50/30'>
+              <div className='p-2 bg-red-100 text-red-600 rounded-lg'><FiPhoneCall className='text-lg' /></div>
+              <div>
+                <p className='text-xs font-bold text-red-400 uppercase tracking-widest mb-0.5'>Primary Contact</p>
+                <p className='text-base font-black text-slate-800'>{profileData?.emergency_contact_name || 'Not Provided'}</p>
+                <p className='text-sm font-bold text-slate-500 mt-0.5 flex items-center gap-1.5'>
+                  {profileData?.emergency_contact_relationship || '-'} <span className='text-slate-300'>•</span> {profileData?.emergency_contact_number || '-'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 5. CLINICAL DIALYSIS PROFILE */}
         <div>
           <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 pl-1'>Clinical Profile</h2>
           <div className='bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden'>
@@ -312,7 +355,7 @@ export default function PatientProfile() {
               </div>
             </div>
 
-            <div className='p-4 border-b border-slate-50 flex items-start gap-3'>
+            <div className='p-4 flex items-start gap-3'>
               <div className='p-2 bg-amber-50 text-amber-600 rounded-lg'>
                 {profileData?.mobility_status === 'Wheelchair' ? <FaWheelchair className='text-lg' /> : <FaWalking className='text-lg' />}
               </div>
@@ -326,7 +369,7 @@ export default function PatientProfile() {
           </div>
         </div>
 
-        {/* INFECTION STATUS GRID */}
+        {/* 6. INFECTION STATUS GRID */}
         <div>
           <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 pl-1'>Infection Status</h2>
           <div className='bg-white rounded-2xl border border-slate-100 shadow-sm p-2 grid grid-cols-3 gap-2'>
@@ -345,10 +388,34 @@ export default function PatientProfile() {
           </div>
         </div>
 
+        {/* 7. ACCOUNT & SUPPORT SETTINGS */}
+        <div>
+          <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 pl-1'>Account & Support</h2>
+          <div className='bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col'>
+            
+            <button onClick={() => router.push('/patient/update-password')} className='p-4 border-b border-slate-50 flex items-center gap-4 hover:bg-slate-50 transition-colors text-left w-full'>
+              <div className='p-2.5 bg-slate-100 text-slate-600 rounded-xl'><FiLock className='text-lg' /></div>
+              <div className='flex-1'>
+                <h4 className='text-sm font-black text-slate-800'>Update Password</h4>
+                <p className='text-[10px] font-bold text-slate-400 mt-0.5'>Change your account password securely</p>
+              </div>
+            </button>
+
+            <button onClick={() => router.push('/patient/support')} className='p-4 flex items-center gap-4 hover:bg-slate-50 transition-colors text-left w-full'>
+              <div className='p-2.5 bg-blue-50 text-blue-600 rounded-xl'><FiHelpCircle className='text-lg' /></div>
+              <div className='flex-1'>
+                <h4 className='text-sm font-black text-slate-800'>Help & Support</h4>
+                <p className='text-[10px] font-bold text-slate-400 mt-0.5'>Contact administration or read FAQs</p>
+              </div>
+            </button>
+
+          </div>
+        </div>
+
         {/* LOGOUT BUTTON */}
         <button 
           onClick={() => setShowLogoutDialog(true)}
-          className='w-full mt-6 py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-red-50 transition-colors'
+          className='w-full mt-2 py-4 bg-white border-2 border-red-100 text-red-600 rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-red-50 transition-colors'
         >
           <FiLogOut className='text-lg' /> Log Out
         </button>
@@ -358,8 +425,56 @@ export default function PatientProfile() {
       <PatientBottomNav />
 
       {/* ========================================= */}
-      {/* REAL DOCUMENT VIEWER OVERLAY */}
+      {/* EDIT EMERGENCY CONTACT MODAL */}
       {/* ========================================= */}
+      {showEditEmergency && (
+        <div className='absolute inset-0 z-50 flex items-end justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in'>
+          <div className='bg-white w-full max-w-md rounded-t-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-full pb-safe'>
+            <div className='flex justify-between items-center mb-6'>
+              <h3 className='text-lg font-black text-slate-800'>Edit Emergency Contact</h3>
+              <button onClick={() => setShowEditEmergency(false)} className='p-2 bg-slate-100 rounded-full text-slate-600'><FiX /></button>
+            </div>
+            
+            {emErrorMsg && (
+              <div className='mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2'>
+                <FiAlertCircle className='text-red-600 shrink-0 mt-0.5' />
+                <p className='text-xs font-bold text-red-700 leading-snug'>{emErrorMsg}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateEmergencyContact} className='space-y-4'>
+              <div>
+                <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Full Name</label>
+                <input type="text" required value={editEmName} onChange={e => setEditEmName(e.target.value)} className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800' placeholder="e.g. Siti Binti Ali" />
+              </div>
+              
+              <div className='grid grid-cols-2 gap-4'>
+                <div>
+                  <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Relationship</label>
+                  <select required value={editEmRel} onChange={e => setEditEmRel(e.target.value)} className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800 appearance-none'>
+                    <option value="" disabled>Select</option>
+                    <option value="Spouse">Spouse</option>
+                    <option value="Child">Child</option>
+                    <option value="Sibling">Sibling</option>
+                    <option value="Parent">Parent</option>
+                    <option value="Friend">Friend</option>
+                  </select>
+                </div>
+                <div>
+                  <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Phone Number</label>
+                  <input type="tel" required value={editEmPhone} onChange={e => setEditEmPhone(e.target.value)} className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800' placeholder="e.g. 012-3456789" />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isUpdatingEm} className='w-full py-4 mt-2 bg-blue-600 text-white rounded-2xl font-black text-sm shadow-md disabled:opacity-50 transition-all'>
+                {isUpdatingEm ? 'Saving...' : 'Save Changes'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REAL DOCUMENT VIEWER OVERLAY */}
       {showDocViewer && (
         <div className='fixed inset-0 z-[100] bg-slate-900/95 flex flex-col animate-in fade-in pb-safe'>
           <div className='flex justify-between items-center p-5'>

@@ -6,7 +6,7 @@ import PatientBottomNav from '../../components/PatientBottomNav';
 
 import { 
   FiMapPin, FiCalendar, FiClock, FiChevronLeft, FiChevronRight,
-  FiFileText, FiAlertCircle, FiCheckCircle
+  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX
 } from 'react-icons/fi';
 
 export default function PatientHome() {
@@ -29,7 +29,6 @@ export default function PatientHome() {
   const [showSuccess, setShowSuccess] = useState('');
   
   const router = useRouter();
-  
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -74,7 +73,6 @@ export default function PatientHome() {
     ? monthBookings.filter(b => new Date(b.booking_date).toDateString() === selectedDate.toDateString())
     : monthBookings;
 
-  // ELDERLY UI FIX: Sort "Nearest Upcoming" to the very top, push "Past" to the bottom.
   const nowTime = today.getTime();
   displayBookings = [...displayBookings].sort((a, b) => {
     const timeA = new Date(a.booking_date).getTime();
@@ -82,13 +80,12 @@ export default function PatientHome() {
     const aIsUpcoming = timeA >= nowTime;
     const bIsUpcoming = timeB >= nowTime;
 
-    if (aIsUpcoming && !bIsUpcoming) return -1; // Future dates jump to top
-    if (!aIsUpcoming && bIsUpcoming) return 1;  // Past dates drop to bottom
-    if (aIsUpcoming && bIsUpcoming) return timeA - timeB; // Sort upcoming ascending (nearest first)
-    return timeB - timeA; // Sort past descending (most recent past first)
+    if (aIsUpcoming && !bIsUpcoming) return -1; 
+    if (!aIsUpcoming && bIsUpcoming) return 1;  
+    if (aIsUpcoming && bIsUpcoming) return timeA - timeB; 
+    return timeB - timeA; 
   });
 
-  // Identify the absolute next upcoming session for highlighting
   let nextSessionFound = false;
 
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
@@ -158,33 +155,62 @@ export default function PatientHome() {
     );
   }
 
+  // --- DYNAMIC TIMELINE GENERATOR ---
+  const generateTimelineSteps = (status: string) => {
+    if (status === 'Cancelled') {
+      return [
+        { title: 'Request Submitted', desc: 'Booking received by system', state: 'completed' },
+        { title: 'Booking Cancelled', desc: 'This session has been voided', state: 'error' }
+      ];
+    }
+    if (status?.includes('Reschedule')) {
+      return [
+        { title: 'Reschedule Requested', desc: 'New date submitted to system', state: 'completed' },
+        { title: 'Manager Review', desc: 'Checking machine availability', state: 'active' },
+        { title: 'Confirmed', desc: 'New schedule locked in', state: 'pending' }
+      ];
+    }
+    if (status === 'Pending Approval' || status === 'Pending') {
+      return [
+        { title: 'Request Submitted', desc: 'Booking received by system', state: 'completed' },
+        { title: 'Manager Review', desc: 'Verifying clinical documents and slots', state: 'active' },
+        { title: 'Confirmed', desc: 'Schedule locked in', state: 'pending' }
+      ];
+    }
+    // Confirmed or Completed
+    return [
+      { title: 'Request Submitted', desc: 'Booking received by system', state: 'completed' },
+      { title: 'Manager Review', desc: 'Documents and slots verified', state: 'completed' },
+      { title: 'Confirmed', desc: 'Ready for treatment', state: 'completed' }
+    ];
+  };
+
   const BookingCard = ({ booking }: { booking: any }) => {
     const bDate = new Date(booking.booking_date);
     const isPast = bDate < today;
-    const isConfirmed = booking.booking_status === 'Confirmed';
     const isCancelled = booking.booking_status === 'Cancelled';
     const isReschedule = booking.booking_status?.includes('Reschedule');
+    const isPending = booking.booking_status?.includes('Pending');
     const style = getStatusStyle(booking.booking_status);
-    
     const displayDay = bDate.toLocaleDateString('en-GB', { weekday: 'short' });
 
-    // Mark as the "Next Session" if it is today or in the future, and we haven't found one yet
     let isNextSession = false;
     if (!isPast && !isCancelled && !nextSessionFound) {
       isNextSession = true;
-      nextSessionFound = true; // Stop highlighting subsequent future cards
+      nextSessionFound = true; 
     }
+
+    // NEW LOGIC: Only show detail button for Travel, Cancelled, Rescheduled, or Pending requests
+    const isTravel = activeTab === 'Travel';
+    const showDetailButton = isTravel || isCancelled || isReschedule || isPending;
 
     return (
       <div className={`bg-white rounded-2xl p-5 border shadow-sm relative overflow-hidden transition-all ${isNextSession ? 'border-blue-400 shadow-md ring-2 ring-blue-100' : isPast || isCancelled ? 'border-slate-100 opacity-75' : 'border-slate-200'}`}>
-        
-        {/* BIG ELDERLY-FRIENDLY "NEXT SESSION" HIGHLIGHT */}
         {isNextSession && (
           <div className='bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 absolute top-0 left-0 w-full text-center shadow-sm'>
             Next Session
           </div>
         )}
-
         <div className={`flex justify-between items-start mb-3 ${isNextSession ? 'mt-4' : ''}`}>
           <div className='flex items-center gap-2'>
             <div className='text-center'>
@@ -210,22 +236,28 @@ export default function PatientHome() {
         </div>
 
         <div className='flex gap-2 border-t border-slate-100 pt-3'>
-          {!isPast && !isCancelled && !isReschedule && (
+          {!isPast && !isCancelled && !isReschedule && !isPending && (
             <>
               <button onClick={() => setRescheduleTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-blue-200 text-blue-600 hover:bg-blue-50'>Reschedule</button>
               <button onClick={() => setCancelDialogTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50'>Cancel</button>
             </>
           )}
-          {isConfirmed && activeTab === 'Travel' && (
-            <button onClick={() => setDetailViewTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-md'>View Detail</button>
-          )}
-          {isPast && activeTab === 'Travel' && (
-            <button onClick={() => router.push('/patient/search')} className='w-full py-3 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50'>Book Again</button>
+          
+          {showDetailButton && (
+            <button onClick={() => setDetailViewTarget(booking)} className={`flex-1 py-3 rounded-xl text-xs font-bold shadow-md ${isPast || isCancelled ? 'bg-slate-100 text-slate-600 shadow-none' : 'bg-blue-600 text-white'}`}>
+              {isTravel ? 'Track Status' : 'View Detail'}
+            </button>
           )}
         </div>
       </div>
     );
   };
+
+  // Determine if the timeline should be shown for the selected detail target
+  const showTimeline = detailViewTarget?.booking_type === 'Travel' || 
+                       detailViewTarget?.booking_status === 'Cancelled' || 
+                       detailViewTarget?.booking_status?.includes('Reschedule') ||
+                       detailViewTarget?.booking_status?.includes('Pending');
 
   return (
     <div className='max-w-md mx-auto bg-slate-50 h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
@@ -293,7 +325,6 @@ export default function PatientHome() {
               </div>
             </div>
 
-            {/* LEGEND */}
             <div className='flex flex-wrap justify-center gap-x-4 gap-y-2 mt-3 px-2'>
               <div className='flex items-center gap-1.5'><div className='w-2.5 h-2.5 rounded-full bg-emerald-400'></div><span className='text-[9px] font-bold text-slate-500 uppercase'>Confirmed</span></div>
               <div className='flex items-center gap-1.5'><div className='w-2.5 h-2.5 rounded-full bg-purple-400'></div><span className='text-[9px] font-bold text-slate-500 uppercase'>Rescheduled</span></div>
@@ -326,7 +357,7 @@ export default function PatientHome() {
       )}
 
       {/* ========================================= */}
-      {/* DETAIL VIEW */}
+      {/* DETAIL & STATUS TRACKING VIEW */}
       {/* ========================================= */}
       {detailViewTarget && !rescheduleTarget && (
         <div className='flex flex-col h-full w-full bg-slate-50 animate-in slide-in-from-right-8 duration-300 z-20 absolute inset-0'>
@@ -338,31 +369,58 @@ export default function PatientHome() {
           </div>
 
           <div className='flex-1 overflow-y-auto p-5 pb-safe custom-scrollbar space-y-5'>
+            
             <div className='bg-white rounded-2xl p-5 shadow-sm border border-slate-100'>
-              <div className='inline-block px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-black uppercase tracking-widest mb-4'>
-                🟢 {detailViewTarget.booking_status}
+              <div className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest mb-4 ${getStatusStyle(detailViewTarget.booking_status).bg} ${getStatusStyle(detailViewTarget.booking_status).text}`}>
+                 {detailViewTarget.booking_status}
               </div>
-              <p className='text-xs font-bold text-slate-400 uppercase mb-1'>Location</p>
+              <p className='text-xs font-bold text-slate-400 uppercase mb-1'>Location Details</p>
               <h2 className='text-lg font-black text-slate-800 leading-tight mb-2'>{detailViewTarget.branches?.branch_name}</h2>
               <p className='text-sm text-slate-500 mb-4'>{detailViewTarget.branches?.branch_address}</p>
+              <p className='text-sm font-black text-slate-700 flex items-center gap-2'><FiClock className="text-blue-500"/> {detailViewTarget.booking_session_time}</p>
             </div>
 
-            <div className='bg-blue-600 rounded-2xl p-5 text-white shadow-lg'>
-              <h3 className='font-black tracking-widest uppercase mb-4 text-sm flex items-center gap-2'>
-                <FiFileText /> Day of Visit Guide
-              </h3>
-              <ol className='space-y-4 text-sm font-medium'>
-                <li className='flex gap-3'><span className='font-black text-blue-200'>1.</span><span>Prepare documents (MyKad, current medication list)</span></li>
-                <li className='flex gap-3'><span className='font-black text-blue-200'>2.</span><span>Arrive 15 mins early for registration</span></li>
-                <li className='flex gap-3'><span className='font-black text-blue-200'>3.</span><span>Present MyKad at counter</span></li>
-                <li className='flex gap-3'><span className='font-black text-blue-200'>4.</span><span>Take Pre-Dialysis Weight & wait in green zone lobby</span></li>
-              </ol>
-            </div>
+            {/* --- SMART CONDITIONAL STATUS TRACKER TIMELINE --- */}
+            {showTimeline && (
+              <div className='bg-white rounded-2xl p-5 shadow-sm border border-slate-100'>
+                <h3 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-5'>Request Status</h3>
+                
+                <div className='relative ml-2'>
+                  <div className='absolute left-[11px] top-2 bottom-6 w-0.5 bg-slate-100'></div>
 
-            <div className='flex gap-3 pt-4'>
-              <button onClick={() => setRescheduleTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 bg-white'>Reschedule</button>
-              <button onClick={() => setCancelDialogTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-red-100 text-red-600 bg-red-50'>Cancel</button>
-            </div>
+                  <div className='space-y-6'>
+                    {generateTimelineSteps(detailViewTarget.booking_status).map((step, idx) => (
+                      <div key={idx} className='relative flex gap-4 items-start'>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 border-2 ${
+                          step.state === 'completed' ? 'bg-emerald-500 border-emerald-500 text-white' : 
+                          step.state === 'active' ? 'bg-amber-100 border-amber-500 text-amber-600' :
+                          step.state === 'error' ? 'bg-red-500 border-red-500 text-white' :
+                          'bg-white border-slate-200 text-slate-300'
+                        }`}>
+                          {step.state === 'completed' && <FiCheckCircle className='text-xs' />}
+                          {step.state === 'active' && <FiMoreVertical className='text-xs animate-pulse' />}
+                          {step.state === 'error' && <FiX className='text-xs' />}
+                        </div>
+                        <div className='pb-1'>
+                          <h4 className={`text-sm font-black ${step.state === 'active' ? 'text-amber-700' : step.state === 'error' ? 'text-red-700' : 'text-slate-800'}`}>
+                            {step.title}
+                          </h4>
+                          <p className='text-xs font-bold text-slate-500 mt-0.5 leading-snug'>{step.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ACTION BUTTONS (Only if active/pending) */}
+            {new Date(detailViewTarget.booking_date) >= today && detailViewTarget.booking_status !== 'Cancelled' && (
+              <div className='flex gap-3 pt-2'>
+                <button onClick={() => setRescheduleTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 bg-white hover:bg-slate-50'>Reschedule</button>
+                <button onClick={() => setCancelDialogTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-red-100 text-red-600 bg-red-50 hover:bg-red-100'>Cancel</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -383,36 +441,36 @@ export default function PatientHome() {
             <div className='bg-white rounded-2xl p-5 shadow-sm border border-slate-200 mb-6'>
               <h3 className='text-lg font-black text-slate-800 mb-3'>{rescheduleTarget.branches?.branch_name}</h3>
               <div className='space-y-2 text-sm'>
-                <p className='flex items-center justify-between'><span className='text-slate-500 font-bold'>Original date:</span><span className='text-slate-800 font-bold'>{new Date(rescheduleTarget.booking_date).toLocaleDateString('en-GB')}</span></p>
-                <p className='flex items-center justify-between'><span className='text-slate-500 font-bold'>Shift:</span><span className='text-slate-800 font-bold'>{rescheduleTarget.booking_session_time}</span></p>
+                <p className='flex items-center justify-between'><span className='text-slate-500 font-bold'>Original date:</span><span className='text-slate-800 font-black'>{new Date(rescheduleTarget.booking_date).toLocaleDateString('en-GB')}</span></p>
+                <p className='flex items-center justify-between'><span className='text-slate-500 font-bold'>Original shift:</span><span className='text-slate-800 font-black'>{rescheduleTarget.booking_session_time.split(' (')[0]}</span></p>
               </div>
             </div>
 
             <form onSubmit={handleConfirmReschedule} className='space-y-6'>
               <div className='p-4 bg-amber-50 border border-amber-100 rounded-2xl'>
-                <label className='block text-xs font-black text-amber-800 uppercase mb-2'>Select New Date</label>
+                <label className='block text-xs font-black text-amber-800 uppercase tracking-widest mb-2'>Select New Date</label>
                 <input type="date" required min={minRescheduleDate} max={maxRescheduleDate} value={newDate} onChange={e => setNewDate(e.target.value)} className='w-full p-3.5 bg-white border border-amber-200 rounded-xl outline-none focus:border-amber-500 font-bold text-slate-800 text-sm' />
                 <p className='text-[10px] font-bold text-amber-600 mt-2 opacity-80'>*Clinical Safety Rule: Rescheduling is strictly limited to 1 day before or after your original slot to prevent dangerous fluid accumulation.</p>
               </div>
 
               <div>
-                <label className='block text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between'>
-                  <span>Select Shift</span>{newDate && <span className='text-emerald-500 text-[10px]'>Checking machine availability...</span>}
+                <label className='block text-xs font-black text-slate-500 uppercase tracking-widest mb-3 flex justify-between'>
+                  <span>Select Shift</span>{newDate && <span className='text-blue-500 text-[10px] animate-pulse'>Checking availability...</span>}
                 </label>
                 <div className='grid grid-cols-2 gap-3'>
-                  <button type="button" onClick={() => setNewShift('Morning (07:00 - 11:00)')} className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Morning') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
+                  <button type="button" onClick={() => setNewShift('Morning (08:00 - 12:00)')} className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Morning') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
                     <FiClock className='text-xl mb-1' />
-                    <span className='text-sm font-bold'>Morning</span>
-                    <span className={`text-[10px] font-medium ${newShift.includes('Morning') ? 'text-slate-300' : 'text-slate-400'}`}>07:00am - 11:00am</span>
+                    <span className='text-sm font-black'>Morning</span>
+                    <span className={`text-[10px] font-bold ${newShift.includes('Morning') ? 'text-slate-300' : 'text-slate-400'}`}>08:00am - 12:00pm</span>
                   </button>
-                  <button type="button" disabled className='w-full h-full p-4 rounded-xl border border-slate-200 bg-slate-100 text-left transition-all flex flex-col gap-1 opacity-60 cursor-not-allowed'>
-                    <FiClock className='text-xl mb-1 text-slate-400' />
-                    <span className='text-sm font-bold text-slate-500'>Afternoon</span>
-                    <span className='text-[10px] font-medium text-red-500 font-bold'>Full (Unavail)</span>
+                  <button type="button" onClick={() => setNewShift('Afternoon (12:00 - 16:00)')} className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Afternoon') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
+                    <FiClock className='text-xl mb-1' />
+                    <span className='text-sm font-black'>Afternoon</span>
+                    <span className={`text-[10px] font-bold ${newShift.includes('Afternoon') ? 'text-slate-300' : 'text-slate-400'}`}>12:00pm - 04:00pm</span>
                   </button>
                 </div>
               </div>
-              <button type="submit" disabled={isProcessing || !newDate || !newShift} className='w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-base shadow-lg disabled:bg-blue-300 transition-all flex justify-center mt-4'>
+              <button type="submit" disabled={isProcessing || !newDate || !newShift} className='w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-base shadow-lg disabled:opacity-50 transition-all flex justify-center mt-4'>
                 {isProcessing ? 'Processing...' : 'Submit reschedule request'}
               </button>
             </form>
@@ -435,8 +493,8 @@ export default function PatientHome() {
               </div>
             ) : (
               <div className='mb-4'>
-                <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Reason for Cancellation <span className="text-red-500">*</span></label>
-                <textarea required value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="E.g., Medical emergency, transportation issue..." className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-red-400 resize-none h-20' />
+                <label className='block text-xs font-black text-slate-500 uppercase tracking-widest mb-2'>Reason for Cancellation <span className="text-red-500">*</span></label>
+                <textarea required value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="E.g., Medical emergency, transportation issue..." className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-red-400 resize-none h-20' />
               </div>
             )}
 
@@ -459,7 +517,7 @@ export default function PatientHome() {
           <div className='bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl text-center animate-in zoom-in-95'>
             <FiCheckCircle className='text-6xl text-emerald-500 mx-auto mb-4' />
             <h3 className='text-xl font-black text-slate-800'>{showSuccess}</h3>
-            <p className='text-sm text-slate-500 mt-2 font-medium'>Awaiting manager approval.</p>
+            <p className='text-sm text-slate-500 mt-2 font-medium'>System updated successfully.</p>
           </div>
         </div>
       )}
