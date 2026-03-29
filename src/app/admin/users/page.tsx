@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { FiActivity } from 'react-icons/fi';
 
 const roleMap: Record<number, string> = {
   1: 'HQ Admin',
@@ -298,7 +299,16 @@ export default function UserManagement() {
     return sortConfig.direction === 'asc' ? <span className="text-blue-600 ml-1">↑</span> : <span className="text-blue-600 ml-1">↓</span>;
   };
 
-  if (isLoading) return <div className='p-8 text-slate-600 font-sans text-center mt-20'>Loading User Accounts...</div>;
+  if (isLoading) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Loading User Accounts...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans relative'>

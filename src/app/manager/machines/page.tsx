@@ -2,6 +2,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
+import { 
+  FiSearch, FiFilter, FiDatabase, FiUsers, FiLock, 
+  FiSettings, FiInbox, FiImage, FiShield, FiAlertTriangle, 
+  FiEye, FiDroplet, FiCamera, FiCheckCircle, FiZoomIn, FiX, FiActivity
+} from 'react-icons/fi';
 
 const formatDateDisplay = (dateStr: string | null) => {
   if (!dateStr) return 'N/A';
@@ -107,8 +112,6 @@ export default function ManagerMachineStatus() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // --- SMART AUTO-COMPLETE MEMORY MAPS ---
-  // 1. Learn Capabilities from existing Models
   const modelMemoryMap = machines.reduce((acc, m) => {
     if (m.model) {
       acc[m.model] = { 
@@ -120,7 +123,6 @@ export default function ManagerMachineStatus() {
     return acc;
   }, {} as Record<string, any>);
 
-  // 2. Learn Contacts from existing Vendors
   const vendorMemoryMap = machines.reduce((acc, m) => {
     if (m.vendor_name && m.vendor_contact) {
       acc[m.vendor_name] = m.vendor_contact;
@@ -131,7 +133,6 @@ export default function ManagerMachineStatus() {
   const uniqueManufacturers = Array.from(new Set(machines.map(m => m.manufacturer).filter(Boolean)));
   const uniqueModels = Array.from(new Set(machines.map(m => m.model).filter(Boolean)));
   const uniqueVendors = Array.from(new Set(machines.map(m => m.vendor_name).filter(Boolean)));
-
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -252,7 +253,16 @@ export default function ManagerMachineStatus() {
     }
   };
 
-  if (isLoading && !branchData) return <div className='p-8 text-center text-slate-500 mt-20'>Loading Clinical Asset Inventory...</div>;
+  if (isLoading && !branchData) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Loading Clinical Asset Inventory...</span>
+        </div>
+      </div>
+    );
+  }
 
   const totalMachines = machines.length;
   const visitorPoolCount = machines.filter(m => !m.dedicated_patient_id).length;
@@ -317,19 +327,19 @@ export default function ManagerMachineStatus() {
         <div className='grid grid-cols-1 md:grid-cols-4 gap-4 mb-8'>
           <div className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between'>
             <div><p className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Total Units</p><p className='text-2xl font-black text-slate-800'>{totalMachines}</p></div>
-            <div className='h-10 w-10 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center text-lg'>🏥</div>
+            <div className='h-10 w-10 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center text-lg'><FiDatabase /></div>
           </div>
           <div className='bg-white p-5 rounded-2xl border border-indigo-200 shadow-sm flex items-center justify-between ring-1 ring-indigo-50'>
             <div><p className='text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1'>Visitor Pool</p><p className='text-2xl font-black text-indigo-700'>{visitorPoolCount}</p></div>
-            <div className='h-10 w-10 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center text-lg'>✈️</div>
+            <div className='h-10 w-10 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center text-lg'><FiUsers /></div>
           </div>
           <div className='bg-white p-5 rounded-2xl border border-blue-200 shadow-sm flex items-center justify-between'>
             <div><p className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Dedicated</p><p className='text-2xl font-black text-blue-700'>{dedicatedPoolCount}</p></div>
-            <div className='h-10 w-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-lg'>🔒</div>
+            <div className='h-10 w-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-lg'><FiLock /></div>
           </div>
           <div className='bg-white p-5 rounded-2xl border border-amber-200 shadow-sm flex items-center justify-between'>
             <div><p className='text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-1'>Maintenance</p><p className='text-2xl font-black text-amber-600'>{maintenanceCount}</p></div>
-            <div className='h-10 w-10 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center text-lg'>🔧</div>
+            <div className='h-10 w-10 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center text-lg'><FiSettings /></div>
           </div>
         </div>
 
@@ -338,7 +348,7 @@ export default function ManagerMachineStatus() {
           
           <div className='flex-1 w-full'>
             <div className='relative'>
-              <span className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400'>🔍</span>
+              <FiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg' />
               <input 
                 type="text" 
                 placeholder="Search Serial No, Asset Tag, or Model..." 
@@ -359,21 +369,21 @@ export default function ManagerMachineStatus() {
 
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className='flex-1 xl:w-48 p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-700 text-sm cursor-pointer'>
               <option value="All">All Statuses</option>
-              <option value="Active">🟢 Active & Ready</option>
-              <option value="Reserved">🔒 Reserved</option>
-              <option value="Under Maintenance">🟡 Under Maint.</option>
-              <option value="Faulty">🔴 Faulty</option>
+              <option value="Active">Active & Ready</option>
+              <option value="Reserved">Reserved</option>
+              <option value="Under Maintenance">Under Maintenance</option>
+              <option value="Faulty">Faulty</option>
             </select>
 
             <select value={allocationFilter} onChange={e => setAllocationFilter(e.target.value)} className='flex-1 xl:w-48 p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-700 text-sm cursor-pointer'>
               <option value="All">All Allocations</option>
-              <option value="Visitor">✈️ Floating Pool</option>
-              <option value="Dedicated">🔒 Dedicated Patients</option>
+              <option value="Visitor">Floating Pool</option>
+              <option value="Dedicated">Dedicated Patients</option>
             </select>
 
             {hasActiveFilters && (
               <button onClick={clearFilters} className='flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors shrink-0' title="Clear all filters">
-                <span className='text-base leading-none'>&times;</span> Clear
+                <FiX className='text-base' /> Clear
               </button>
             )}
           </div>
@@ -381,8 +391,8 @@ export default function ManagerMachineStatus() {
 
         {/* --- CLINICAL MACHINE CARDS --- */}
         {filteredMachines.length === 0 ? (
-          <div className='bg-white border border-slate-200 rounded-2xl py-16 text-center shadow-sm'>
-            <span className='text-5xl mb-4 block opacity-50'>📭</span>
+          <div className='bg-white border border-slate-200 rounded-2xl py-16 text-center shadow-sm flex flex-col items-center justify-center'>
+            <FiInbox className='text-5xl mb-4 text-slate-400 opacity-50' />
             <h3 className='text-lg font-bold text-slate-700'>No machines found</h3>
             <p className='text-slate-500 text-sm mt-1'>Try adjusting your filters or search terms.</p>
             {hasActiveFilters && (
@@ -403,7 +413,9 @@ export default function ManagerMachineStatus() {
                   
                   <div className={`px-5 py-2.5 text-[11px] font-black uppercase tracking-widest flex justify-between items-center
                     ${isInfectious ? 'bg-rose-600 text-white' : patient ? 'bg-blue-600 text-white' : 'bg-indigo-50 text-indigo-700 border-b border-indigo-100'}`}>
-                    <span>{patient ? `🔒 Dedicated: ${patient.users?.user_fullname}` : '✈️ Floating Pool'}</span>
+                    <span className='flex items-center gap-1.5'>
+                      {patient ? <><FiLock /> Dedicated: {patient.users?.user_fullname}</> : <><FiUsers /> Floating Pool</>}
+                    </span>
                     <span className={`px-2 py-0.5 rounded shadow-sm ${machine.status === 'Active' ? 'bg-emerald-400 text-white' : machine.status === 'Under Maintenance' ? 'bg-amber-400 text-white' : machine.status === 'Reserved' ? 'bg-blue-400 text-white' : 'bg-rose-400 text-white'}`}>{machine.status}</span>
                   </div>
 
@@ -418,7 +430,7 @@ export default function ManagerMachineStatus() {
                           <img src={machine.photo_url} alt={machine.model} className='w-full h-full object-cover' />
                         ) : (
                           <>
-                            <span className='text-3xl mb-1'>📷</span>
+                            <FiImage className='text-3xl mb-1' />
                             <span className='text-[9px] font-bold uppercase'>No Image</span>
                           </>
                         )}
@@ -426,7 +438,7 @@ export default function ManagerMachineStatus() {
                       <div className='flex gap-1 justify-center flex-wrap'>
                         {machine.supports_hdf && <span className='px-1.5 py-0.5 bg-purple-100 text-purple-700 border border-purple-200 text-[9px] font-black rounded uppercase tracking-wider' title="Hemodiafiltration">HDF</span>}
                         {machine.has_bvm && <span className='px-1.5 py-0.5 bg-teal-100 text-teal-700 border border-teal-200 text-[9px] font-black rounded uppercase tracking-wider' title="Blood Volume Monitor">BVM</span>}
-                        {machine.has_endotoxin_filter && <span className='px-1.5 py-0.5 bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black rounded uppercase tracking-wider' title="Endotoxin / Diasafe Filter">🛡️ EF</span>}
+                        {machine.has_endotoxin_filter && <span className='flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black rounded uppercase tracking-wider' title="Endotoxin / Diasafe Filter"><FiShield /> EF</span>}
                       </div>
                     </div>
 
@@ -444,13 +456,13 @@ export default function ManagerMachineStatus() {
                       {patient && (
                         <div className={`mt-3 p-3 rounded-lg border ${isInfectious ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
                           <div className='flex flex-wrap gap-2'>
-                            {patient.hepatitis_b_status === 'Positive' && <span className='px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'>⚠️ HBV+</span>}
-                            {patient.hepatitis_c_status === 'Positive' && <span className='px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'>⚠️ HCV+</span>}
-                            {patient.hiv_status === 'Positive' && <span className='px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'>⚠️ HIV+</span>}
-                            {patient.requires_line_of_sight && <span className='px-2 py-1 bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold rounded-md'>👁️ Line of Sight</span>}
+                            {patient.hepatitis_b_status === 'Positive' && <span className='flex items-center gap-1 px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'><FiAlertTriangle /> HBV+</span>}
+                            {patient.hepatitis_c_status === 'Positive' && <span className='flex items-center gap-1 px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'><FiAlertTriangle /> HCV+</span>}
+                            {patient.hiv_status === 'Positive' && <span className='flex items-center gap-1 px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'><FiAlertTriangle /> HIV+</span>}
+                            {patient.requires_line_of_sight && <span className='flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold rounded-md'><FiEye /> Line of Sight</span>}
                             {patient.vascular_access_type && (
                               <span className='px-2 py-1 bg-white border border-slate-200 text-slate-600 text-[10px] font-bold rounded-md flex items-center gap-1'>
-                                🩸 {patient.vascular_access_location || ''} {patient.vascular_access_type}
+                                <FiDroplet /> {patient.vascular_access_location || ''} {patient.vascular_access_type}
                               </span>
                             )}
                           </div>
@@ -486,7 +498,7 @@ export default function ManagerMachineStatus() {
       {enlargedPhoto && (
         <div className='fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[100] flex items-center justify-center p-4 sm:p-8 animate-in fade-in zoom-in-95 cursor-pointer' onClick={() => setEnlargedPhoto(null)}>
           <div className='relative max-w-5xl max-h-[90vh] w-full h-full flex flex-col items-center justify-center'>
-            <button onClick={() => setEnlargedPhoto(null)} className='absolute top-0 right-0 sm:top-4 sm:right-4 text-white hover:text-red-400 text-4xl font-black bg-slate-900/50 hover:bg-slate-800 w-14 h-14 rounded-full flex items-center justify-center transition-all'>&times;</button>
+            <button onClick={() => setEnlargedPhoto(null)} className='absolute top-0 right-0 sm:top-4 sm:right-4 text-white hover:text-red-400 text-4xl font-black bg-slate-900/50 hover:bg-slate-800 w-14 h-14 rounded-full flex items-center justify-center transition-all'><FiX /></button>
             <img src={enlargedPhoto} alt="Enlarged Detail" className='max-w-full max-h-full object-contain rounded-xl shadow-2xl ring-1 ring-white/10 cursor-auto' onClick={(e) => e.stopPropagation()} />
           </div>
         </div>
@@ -498,7 +510,7 @@ export default function ManagerMachineStatus() {
           <div className='bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden my-8'>
             <div className='px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 sticky top-0 z-10'>
               <h3 className='font-bold text-slate-800'>{modalMode === 'add' ? 'Register New Medical Asset' : 'Update Medical Asset Dossier'}</h3>
-              <button onClick={() => setIsModalOpen(false)} className='text-slate-400 hover:text-slate-600 text-xl font-bold'>&times;</button>
+              <button onClick={() => setIsModalOpen(false)} className='text-slate-400 hover:text-slate-600 text-xl font-bold'><FiX /></button>
             </div>
             
             <form onSubmit={handleSaveMachine} className='p-6'>
@@ -511,12 +523,12 @@ export default function ManagerMachineStatus() {
                         <div className='w-full h-40 bg-white rounded-lg overflow-hidden flex items-center justify-center relative cursor-pointer group-hover:opacity-90 transition-opacity' onClick={() => setEnlargedPhoto(formData.photo_url)}>
                           <img src={formData.photo_url} alt="Preview" className='max-w-full max-h-full object-contain drop-shadow-sm' />
                           <div className='absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-all'>
-                            <span className='text-3xl opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all drop-shadow-md'>🔍</span>
+                            <FiZoomIn className='text-3xl text-white opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all drop-shadow-md' />
                           </div>
                         </div>
                       ) : (
                         <div className='w-full h-40 bg-white rounded-lg flex flex-col items-center justify-center text-slate-400 group-hover:text-blue-500 transition-colors'>
-                          <span className='text-3xl mb-2'>📸</span>
+                          <FiCamera className='text-3xl mb-2' />
                           <span className='text-xs font-bold'>Upload Asset Photo</span>
                         </div>
                       )}
@@ -552,7 +564,6 @@ export default function ManagerMachineStatus() {
                       </div>
                       <div>
                         <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Model</label>
-                        {/* SMART AUTOCOMPLETE LOGIC FOR CAPABILITIES */}
                         <input 
                           type="text" list="model-options" value={formData.model} 
                           onChange={e => {
@@ -588,7 +599,7 @@ export default function ManagerMachineStatus() {
                     <div>
                       <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Patient Allocation</label>
                       <select value={formData.dedicated_patient_id} onChange={e => { const newId = e.target.value; setFormData(prev => ({ ...prev, dedicated_patient_id: newId, status: newId ? (prev.status === 'Active' ? 'Reserved' : prev.status) : (prev.status === 'Reserved' ? 'Active' : prev.status) })); }} className='w-full p-3 bg-white border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800'>
-                        <option value="">✈️ Floating Pool (Available to Visitors)</option>
+                        <option value="">Floating Pool (Available to Visitors)</option>
                         <optgroup label="Dedicated To Patient:">
                           {patients.map(p => <option key={p.patient_id} value={p.patient_id}>🔒 {p.users?.user_fullname}</option>)}
                         </optgroup>
@@ -597,10 +608,10 @@ export default function ManagerMachineStatus() {
                     <div>
                       <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Operational Status</label>
                       <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className={`w-full p-3 border rounded-xl outline-none font-bold text-sm ${formData.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : formData.status === 'Under Maintenance' ? 'bg-amber-50 text-amber-700 border-amber-200' : formData.status === 'Reserved' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-                        {!formData.dedicated_patient_id && <option value="Active">🟢 Active & Ready</option>}
-                        {formData.dedicated_patient_id && <option value="Reserved">🔒 Reserved (Dedicated)</option>}
-                        <option value="Under Maintenance">🟡 Under Maintenance</option>
-                        <option value="Faulty">🔴 Faulty</option>
+                        {!formData.dedicated_patient_id && <option value="Active">Active & Ready</option>}
+                        {formData.dedicated_patient_id && <option value="Reserved">Reserved (Dedicated)</option>}
+                        <option value="Under Maintenance">Under Maintenance</option>
+                        <option value="Faulty">Faulty</option>
                       </select>
                     </div>
                     {(formData.status === 'Under Maintenance' || formData.status === 'Faulty') && (
@@ -627,7 +638,6 @@ export default function ManagerMachineStatus() {
                     <div className='grid grid-cols-2 gap-4'>
                       <div className='col-span-2'>
                         <label className='block text-xs font-bold text-amber-800 uppercase mb-2'>Service Vendor</label>
-                        {/* SMART AUTOCOMPLETE LOGIC FOR VENDOR CONTACT */}
                         <input 
                           type="text" list="vendor-options" placeholder="e.g. Mediserve Sdn Bhd" value={formData.vendor_name} 
                           onChange={e => {
@@ -653,7 +663,7 @@ export default function ManagerMachineStatus() {
 
               {message.text && (
                 <div className={`mt-6 p-4 rounded-xl font-bold text-sm border flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                  <span className='mt-0.5'>{message.type === 'success' ? '✅' : '⚠️'}</span>
+                  <span className='mt-0.5 text-lg'>{message.type === 'success' ? <FiCheckCircle /> : <FiAlertTriangle />}</span>
                   <span>{message.text}</span>
                 </div>
               )}

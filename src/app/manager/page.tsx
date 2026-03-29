@@ -1,260 +1,552 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import Link from 'next/link';
+import { 
+  FiUsers, FiInbox, FiSettings, FiActivity, 
+  FiClock, FiAlertTriangle, FiCheckCircle, 
+  FiChevronRight, FiMapPin, FiCalendar, FiShield,
+  FiUser, FiEdit2, FiDroplet, FiFileText, FiEye, FiX, FiSearch
+} from 'react-icons/fi';
+
+const getLocalISODate = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default function ManagerDashboard() {
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Primary Path 2: System defaults to current date
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  
-  // Exception Path 3(b): Network Error & Cached Data tracking
-  const [isNetworkError, setIsNetworkError] = useState(false);
-  const [cachedTimestamp, setCachedTimestamp] = useState<string | null>(null);
-
-  // Alternative Path 3(a): Incomplete Setup tracking
-  const [setupStatus, setSetupStatus] = useState<'checking' | 'complete' | 'incomplete'>('checking');
-
   const [branchData, setBranchData] = useState<any>(null);
-  const [metrics, setMetrics] = useState({
+  const [managerName, setManagerName] = useState('');
+  
+  const [patientSearch, setPatientSearch] = useState('');
+
+  const [dbBookings, setDbBookings] = useState<any[]>([]);
+  const [branchPatients, setBranchPatients] = useState<any[]>([]);
+  const [branchMachines, setBranchMachines] = useState<any[]>([]);
+  
+  const [baseMetrics, setBaseMetrics] = useState({
     pendingRequests: 0,
-    confirmedSessions: 0,
-    totalDailyCapacity: 0,
-    occupancyRate: 0,
-    nursesOnDuty: 0
+    activeMachines: 0,
+    downMachines: 0,
+    staffOnDutyToday: 0,
+    totalHomePatients: 0
   });
 
-  // Ref to hold the last successful data snapshot for Exception 3(b)
-  const cachedDataRef = useRef<any>(null);
+  const [selectedPatient, setSelectedPatient] = useState<any>(null);
+  const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [clashWarning, setClashWarning] = useState<string | null>(null);
+  const [patientForm, setPatientForm] = useState({
+    schedule_pattern: 'MWF',
+    preferred_shift: '',
+    machine_id: ''
+  });
+
+  const fetchDashboardData = async () => {
+    setIsLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) return;
+
+      const email = sessionData.session.user.email;
+      const { data: userData } = await supabase.from('users').select('user_id, user_fullname, branch_id').eq('user_email', email).single();
+      if (!userData || !userData.branch_id) throw new Error("No branch assigned.");
+      
+      setManagerName(userData.user_fullname);
+      const branchId = userData.branch_id;
+
+      const { data: branch } = await supabase.from('branches').select('*').eq('id', branchId).single();
+      setBranchData(branch);
+
+      const { data: machinesData } = await supabase.from('machines').select('*').eq('branch_id', branchId);
+      setBranchMachines(machinesData || []);
+
+      const { data: patientsData } = await supabase
+        .from('patients')
+        .select('*, users(user_fullname, user_ic, user_contact_number)')
+        .eq('home_branch_id', branchId)
+        .order('patient_id', { ascending: true });
+      
+      const patientsWithMachines = (patientsData || []).map(p => ({
+        ...p,
+        assigned_machine: (machinesData || []).find(m => m.id === p.assigned_machine_id) || null
+      }));
+      setBranchPatients(patientsWithMachines);
+
+      // Fetch 14-day rolling window for physical DB records
+      const now = new Date();
+      const startDateStr = getLocalISODate(now);
+      
+      const endWindow = new Date(now);
+      endWindow.setDate(now.getDate() + 14);
+      const endDateStr = getLocalISODate(endWindow);
+
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('*, patients(*, users(user_fullname, user_ic)), machines(serial_number, model)')
+        .eq('branch_id', branchId)
+        .gte('booking_date', startDateStr)
+        .lte('booking_date', endDateStr);
+
+      setDbBookings(bookings || []);
+
+      const { count: pendingCount } = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).like('booking_status', 'Pending%');
+      const activeMachines = machinesData?.filter(m => m.status === 'Active' || m.status === 'Reserved').length || 0;
+      const downMachines = machinesData?.filter(m => m.status === 'Under Maintenance' || m.status === 'Faulty').length || 0;
+
+      // Staff on duty strictly for TODAY
+      const isSunday = now.getDay() === 0;
+      let staffOnDutyToday = 0;
+
+      if (!isSunday) {
+        const { data: todayRoster } = await supabase
+          .from('staff_roster')
+          .select('nurse_id')
+          .eq('branch_id', branchId)
+          .eq('shift_date', startDateStr)
+          .eq('shift_type', 'WORK');
+        staffOnDutyToday = new Set(todayRoster?.map(r => r.nurse_id)).size;
+      }
+
+      setBaseMetrics({
+        pendingRequests: pendingCount || 0,
+        activeMachines,
+        downMachines,
+        staffOnDutyToday,
+        totalHomePatients: patientsData?.length || 0
+      });
+
+    } catch (error: any) {
+      console.error("Dashboard error:", error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchDashboardData() {
-      setIsLoading(true);
-      setIsNetworkError(false);
+    fetchDashboardData();
+  }, []);
 
-      try {
-        // Pre-condition: Authenticate Manager
-        const { data: sessionData, error: authErr } = await supabase.auth.getSession();
-        if (authErr || !sessionData.session) throw new Error("Authentication failed.");
+  // ============================================================================
+  // DYNAMIC SCHEDULE CALCULATOR (Rolling 14 Days)
+  // ============================================================================
+  const { dynamicSchedule, dynamicMetrics } = useMemo(() => {
+    const now = new Date();
+    const startDate = new Date(now);
+    const endDate = new Date(now);
+    endDate.setDate(now.getDate() + 14); // 14 Day Projection
 
-        const email = sessionData.session.user.email;
-        
-        // Retrieve manager's assigned branch
-        const { data: managerProfile, error: profileErr } = await supabase
-          .from('users')
-          .select('branch_id')
-          .eq('user_email', email)
-          .single();
-
-        if (profileErr || !managerProfile?.branch_id) throw new Error("Profile error or no branch assigned.");
-        const branchId = managerProfile.branch_id;
-
-        // Primary Path 3 & 4: Retrieve real-time status for machines, rosters, and bookings
-        // Using Promise.all to fetch from the tables defined in your ERD simultaneously
-        const [branchRes, machinesRes, staffRes, rosterRes, bookingsRes] = await Promise.all([
-          supabase.from('branches').select('*').eq('id', branchId).single(),
-          supabase.from('machines').select('id').eq('branch_id', branchId),
-          supabase.from('users').select('user_id').eq('branch_id', branchId).eq('role_id', 4), // 4 = Nurse
-          supabase.from('staff_roster').select('id').eq('branch_id', branchId).eq('shift_date', selectedDate),
-          supabase.from('bookings').select('id, status').eq('branch_id', branchId).eq('booking_date', selectedDate)
-        ]);
-
-        if (branchRes.error) throw new Error("Database query failed.");
-
-        const branchDetails = branchRes.data;
-        const machines = machinesRes.data || [];
-        const nurses = staffRes.data || [];
-        const roster = rosterRes.data || [];
-        const bookings = bookingsRes.data || [];
-
-        // Alternative Path 3(a): Detect if machine inventory or staff roster has not been configured
-        if (machines.length === 0 || nurses.length === 0) {
-          setSetupStatus('incomplete');
-          setIsLoading(false);
-          return;
-        }
-
-        setSetupStatus('complete');
-
-        // Calculate Metrics for the selected date
-        // Note: Using 'PENDING_REVIEW' as strictly defined in your default constraints
-        const confirmedCount = bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'APPROVED').length;
-        const pendingCount = bookings.filter(b => b.status === 'PENDING_REVIEW').length;
-        
-        // Assuming 3 shifts per machine per day (Morning, Afternoon, Evening) for total capacity
-        const dailyCapacity = branchDetails.total_machines * 3; 
-        
-        // Primary Path 5 & Alternative Path 4(a).2: Occupancy Rate (Booked Slots / Total Capacity * 100)
-        let occupancy = 0;
-        if (confirmedCount > 0 && dailyCapacity > 0) {
-          occupancy = Math.round((confirmedCount / dailyCapacity) * 100);
-        }
-
-        const newData = {
-          branch: branchDetails,
-          metrics: {
-            pendingRequests: pendingCount,
-            confirmedSessions: confirmedCount,
-            totalDailyCapacity: dailyCapacity,
-            occupancyRate: occupancy,
-            nursesOnDuty: roster.length // Count of shift assignments for the selected date
-          },
-          timestamp: new Date().toLocaleTimeString()
-        };
-
-        // Save successfully fetched data to state and cache
-        setBranchData(newData.branch);
-        setMetrics(newData.metrics);
-        setCachedTimestamp(newData.timestamp);
-        cachedDataRef.current = newData;
-
-      } catch (err: any) {
-        // Exception Path 3(b): Network error fallback
-        setIsNetworkError(true);
-        if (cachedDataRef.current) {
-          setBranchData(cachedDataRef.current.branch);
-          setMetrics(cachedDataRef.current.metrics);
-          setCachedTimestamp(cachedDataRef.current.timestamp);
-        }
-      } finally {
-        setIsLoading(false);
-      }
+    const dateArray: string[] = [];
+    let curr = new Date(startDate);
+    while (curr <= endDate) {
+      dateArray.push(getLocalISODate(curr));
+      curr.setDate(curr.getDate() + 1);
     }
 
-    fetchDashboardData();
-  }, [selectedDate]); // Primary Path 8: Re-fetches data when selectedDate changes
+    let calculatedTotalSessions = 0;
+    let isolationCount = 0;
+    const grouped: Record<string, { Morning: any[], Afternoon: any[], Evening: any[] }> = {};
 
-  // Loading State
-  if (isLoading && !cachedDataRef.current) {
-    return <div className='p-8 text-slate-600 font-sans text-center mt-20'>Loading Real-Time Metrics...</div>;
-  }
+    dateArray.forEach(dateStr => {
+      const dow = new Date(dateStr).getDay(); 
+      
+      const dbForDate = dbBookings.filter(b => b.booking_date === dateStr);
+      const overriddenIds = new Set(dbForDate.map(b => b.patient_id)); 
+      
+      const activeDbBookings = dbForDate.filter(b => 
+        !['Moved', 'Cancelled', 'Cancellation Rejected', 'Reschedule Rejected'].includes(b.booking_status)
+      );
 
-  // Alternative Path 3(a): Incomplete Setup State
-  if (setupStatus === 'incomplete') {
+      const routineSessions = branchPatients.filter(p => {
+        if (overriddenIds.has(p.patient_id)) return false; 
+        if (p.schedule_pattern === 'MWF' && [1, 3, 5].includes(dow)) return true;
+        if (p.schedule_pattern === 'TTS' && [2, 4, 6].includes(dow)) return true;
+        return false;
+      }).map(p => ({
+        id: `virtual-${p.patient_id}-${dateStr}`,
+        patient_id: p.patient_id,
+        booking_date: dateStr,
+        booking_session_time: p.preferred_shift || 'Unassigned',
+        booking_type: 'Home',
+        booking_status: 'Scheduled', 
+        patients: p,
+        machines: p.assigned_machine
+      }));
+
+      const allToday = [...activeDbBookings, ...routineSessions];
+      
+      if (allToday.length > 0) {
+        grouped[dateStr] = { Morning: [], Afternoon: [], Evening: [] };
+        
+        allToday.forEach(session => {
+          calculatedTotalSessions++;
+          if (session.patients?.hepatitis_b_status === 'Positive' || session.patients?.hepatitis_c_status === 'Positive' || session.patients?.hiv_status === 'Positive') {
+            isolationCount++;
+          }
+
+          if (session.booking_session_time?.includes('Morning')) grouped[dateStr].Morning.push(session);
+          else if (session.booking_session_time?.includes('Afternoon')) grouped[dateStr].Afternoon.push(session);
+          else if (session.booking_session_time?.includes('Evening')) grouped[dateStr].Evening.push(session);
+          else grouped[dateStr].Morning.push(session);
+        });
+      }
+    });
+
+    return { dynamicSchedule: grouped, dynamicMetrics: { totalSessions: calculatedTotalSessions, isolationCases: isolationCount } };
+  }, [dbBookings, branchPatients]);
+
+  const sortedDates = Object.keys(dynamicSchedule).sort();
+
+  // =================================================================
+  // LOGISTICS HANDLING
+  // =================================================================
+  useEffect(() => {
+    if (!patientForm.machine_id || !patientForm.schedule_pattern || !patientForm.preferred_shift || !selectedPatient) {
+      setClashWarning(null); return;
+    }
+    const conflictingPatient = branchPatients.find(p => p.patient_id !== selectedPatient.patient_id && p.assigned_machine_id?.toString() === patientForm.machine_id && p.schedule_pattern === patientForm.schedule_pattern && p.preferred_shift === patientForm.preferred_shift);
+    if (conflictingPatient) {
+      const machineInfo = branchMachines.find(m => m.id.toString() === patientForm.machine_id);
+      setClashWarning(`CLASH: Machine ${machineInfo?.serial_number} is already assigned to ${conflictingPatient.users?.user_fullname} during this timeframe.`);
+    } else { setClashWarning(null); }
+  }, [patientForm, branchPatients, selectedPatient, branchMachines]);
+
+  const openPatientModal = (patient: any) => {
+    setSelectedPatient(patient);
+    setPatientForm({
+      schedule_pattern: patient.schedule_pattern || 'MWF',
+      preferred_shift: patient.preferred_shift || '',
+      machine_id: patient.assigned_machine_id?.toString() || ''
+    });
+    setClashWarning(null); setIsPatientModalOpen(true);
+  };
+
+  const handleSavePatientLogistics = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (clashWarning) return; 
+    setIsSaving(true);
+    try {
+      await supabase.from('patients').update({ 
+        schedule_pattern: patientForm.schedule_pattern,
+        preferred_shift: patientForm.preferred_shift,
+        assigned_machine_id: patientForm.machine_id ? parseInt(patientForm.machine_id) : null
+      }).eq('patient_id', selectedPatient.patient_id);
+      setIsPatientModalOpen(false);
+      fetchDashboardData(); 
+    } catch (error: any) { alert(`Error updating patient: ${error.message}`); } finally { setIsSaving(false); }
+  };
+
+  if (isLoading && !branchData) {
     return (
-      <main className='p-8 bg-slate-50 min-h-screen font-sans flex items-center justify-center'>
-        <div className='bg-white p-8 rounded-2xl border border-red-200 shadow-lg text-center max-w-md'>
-          <div className='text-5xl mb-4'>⚠️</div>
-          <h2 className='text-xl font-bold text-slate-900 mb-2'>Incomplete Setup</h2>
-          <p className='text-slate-600 mb-6 text-sm leading-relaxed'>
-            The system detects that the machine inventory or staff roster has not been configured for this branch.
-          </p>
-          <Link href="/manager/settings" className='inline-block w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors'>
-            Configure Resources
-          </Link>
-        </div>
-      </main>
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'><FiActivity className='text-4xl mb-4 animate-spin' /><span>Loading Branch Operations...</span></div>
+      </div>
     );
   }
 
+  const ShiftSection = ({ title, sessions }: { title: string, sessions: any[] }) => {
+    if (sessions.length === 0) return null;
+    return (
+      <div className='mb-6 last:mb-0'>
+        <h3 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 pb-2 flex items-center gap-2'>
+          <FiClock className='text-blue-500' /> {title}
+        </h3>
+        <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
+          {sessions.map(session => {
+            const patient = session.patients;
+            const isInfectious = patient?.hepatitis_b_status === 'Positive' || patient?.hepatitis_c_status === 'Positive' || patient?.hiv_status === 'Positive';
+            return (
+              <div key={session.id} className={`p-4 rounded-xl border ${isInfectious ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'} shadow-sm flex flex-col justify-between`}>
+                <div className='flex justify-between items-start mb-2'>
+                  <div>
+                    <h4 className='font-bold text-slate-800 text-sm truncate max-w-[150px]' title={patient?.users?.user_fullname}>{patient?.users?.user_fullname}</h4>
+                    <p className='text-xs text-slate-500 mt-0.5'>{session.booking_type === 'Travel' ? '✈️ Travel Guest' : '🏠 Home Patient'}</p>
+                  </div>
+                  {isInfectious && <span className='px-2 py-1 bg-rose-600 text-white text-[9px] font-black uppercase tracking-wider rounded flex items-center gap-1 shrink-0'><FiAlertTriangle /> Isolation</span>}
+                </div>
+                <div className='mt-3 pt-3 border-t border-slate-100/50 flex items-center justify-between text-xs font-bold'>
+                  <span className={`flex items-center gap-1.5 ${session.machines ? 'text-slate-600' : 'text-amber-600'}`}>
+                    <FiSettings /> {session.machines ? session.machines.serial_number : 'Unassigned'}
+                  </span>
+                  <span className={`px-2 py-1 rounded text-[10px] uppercase tracking-wider ${
+                    session.booking_status === 'Completed' ? 'bg-emerald-100 text-emerald-700' : 
+                    session.booking_status === 'Scheduled' ? 'bg-slate-100 text-slate-600 border border-slate-200' :
+                    session.booking_status === 'Rescheduled' ? 'bg-purple-100 text-purple-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {session.booking_status}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const filteredPatients = branchPatients.filter(p => p.users?.user_fullname.toLowerCase().includes(patientSearch.toLowerCase()) || p.users?.user_ic.includes(patientSearch));
+
   return (
-    <main className='p-8 bg-slate-50 min-h-screen font-sans'>
+    <main className='p-8 bg-slate-50 min-h-screen font-sans pb-24'>
       <div className='max-w-7xl mx-auto'>
         
-        {/* Exception Path 3(b): Network Error Banner */}
-        {isNetworkError && cachedTimestamp && (
-          <div className='mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm font-bold animate-in fade-in'>
-            <span>⚠️</span>
-            <span>Unable to load real-time metrics. Displaying cached data from {cachedTimestamp}.</span>
+        {/* HEADER */}
+        <div className='flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4'>
+          <div>
+            <p className='text-sm font-bold text-blue-600 mb-1 flex items-center gap-2'><FiCalendar /> {new Date().toLocaleDateString('en-MY', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <h1 className='text-3xl font-black text-slate-800 tracking-tight'>Branch Dashboard</h1>
+            <p className='text-slate-500 mt-1 font-medium flex items-center gap-1.5'><FiMapPin /> {branchData?.branch_name} | {managerName}</p>
+          </div>
+        </div>
+
+        {/* GLOBAL SYSTEM ALERTS */}
+        {(baseMetrics.pendingRequests > 0 || baseMetrics.downMachines > 0) && (
+          <div className='mb-8 flex flex-col gap-3'>
+            {baseMetrics.pendingRequests > 0 && (
+              <div className='bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in'>
+                <div className='flex items-center gap-3 text-amber-800 font-bold text-sm'>
+                  <div className='w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-lg shrink-0'><FiInbox /></div>
+                  <p>You have {baseMetrics.pendingRequests} pending exception requests awaiting your approval.</p>
+                </div>
+                <Link href='/manager/bookings' className='px-5 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 transition-colors shrink-0'>Review Pipeline</Link>
+              </div>
+            )}
+            {baseMetrics.downMachines > 0 && (
+              <div className='bg-rose-50 border border-rose-200 p-4 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in'>
+                <div className='flex items-center gap-3 text-rose-800 font-bold text-sm'>
+                  <div className='w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 text-lg shrink-0'><FiAlertTriangle /></div>
+                  <p>{baseMetrics.downMachines} machines are currently flagged as Faulty or Under Maintenance.</p>
+                </div>
+                <Link href='/manager/machines' className='px-5 py-2 bg-rose-600 text-white text-xs font-bold rounded-xl hover:bg-rose-700 transition-colors shrink-0'>Check Inventory</Link>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Dashboard Header */}
-        <div className='flex flex-col md:flex-row justify-between items-end mb-8 gap-4'>
-          <div>
-            <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Branch Dashboard</h1>
-            <div className='mt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3'>
-              <span className='inline-flex items-center gap-1.5 px-3 py-1 bg-blue-100 text-blue-800 rounded-lg text-sm font-bold shadow-sm'>
-                <span>🏥</span> {branchData?.branch_name || 'Loading Branch Name...'}
-              </span>
-              <span className='text-slate-500 text-sm font-medium flex items-center gap-1.5'>
-                <span>📍</span> {branchData?.branch_address || 'Address not configured'}
-              </span>
+        {/* KPI METRICS GRID */}
+        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
+          
+          <div className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden'>
+            <div className='absolute right-0 top-0 w-24 h-24 bg-blue-50 rounded-bl-full opacity-50'></div>
+            <div className='relative z-10'>
+              <div className='flex justify-between items-start mb-2'><p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>Upcoming Sessions</p><FiActivity className='text-xl text-blue-500' /></div>
+              <h3 className='text-3xl font-black text-slate-800'>{dynamicMetrics.totalSessions}</h3>
+              <p className='text-xs font-bold text-slate-500 mt-2'>{dynamicMetrics.isolationCases > 0 ? <span className='text-rose-600 flex items-center gap-1'><FiShield /> {dynamicMetrics.isolationCases} isolation protocols</span> : 'All standard clearance'}</p>
             </div>
           </div>
-          
-          {/* Primary Path 7: Date Picker */}
-          <div className='flex flex-col items-end'>
-            <label className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5'>Viewing Schedule For</label>
-            <input 
-              type="date" 
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className='px-4 py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm font-bold text-slate-700 shadow-sm cursor-pointer hover:bg-slate-50 transition-colors'
-            />
-          </div>
+
+          <Link href="/manager/bookings" className={`p-5 rounded-2xl border shadow-sm relative overflow-hidden group transition-all ${baseMetrics.pendingRequests > 0 ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+            <div className='relative z-10'>
+              <div className='flex justify-between items-start mb-2'><p className={`text-[10px] font-black uppercase tracking-widest ${baseMetrics.pendingRequests > 0 ? 'text-amber-700' : 'text-slate-400'}`}>Pending Approvals</p><FiInbox className={`text-xl ${baseMetrics.pendingRequests > 0 ? 'text-amber-600' : 'text-slate-400'}`} /></div>
+              <h3 className={`text-3xl font-black ${baseMetrics.pendingRequests > 0 ? 'text-amber-800' : 'text-slate-800'}`}>{baseMetrics.pendingRequests}</h3>
+              <p className={`text-xs font-bold mt-2 flex items-center gap-1 ${baseMetrics.pendingRequests > 0 ? 'text-amber-600' : 'text-slate-500'}`}>View Pipeline <FiChevronRight className='opacity-0 group-hover:opacity-100 transition-opacity' /></p>
+            </div>
+          </Link>
+
+          <Link href="/manager/machines" className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden hover:bg-slate-50 transition-colors group'>
+            <div className='relative z-10'>
+              <div className='flex justify-between items-start mb-2'><p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>Machine Status</p><FiSettings className='text-xl text-slate-400' /></div>
+              <div className='flex items-baseline gap-2'><h3 className='text-3xl font-black text-slate-800'>{baseMetrics.activeMachines}</h3><span className='text-sm font-bold text-slate-500'>Active</span></div>
+              <div className='flex items-center justify-between mt-2'><p className={`text-xs font-bold ${baseMetrics.downMachines > 0 ? 'text-rose-600 flex items-center gap-1' : 'text-emerald-600 flex items-center gap-1'}`}>{baseMetrics.downMachines > 0 ? <><FiAlertTriangle /> {baseMetrics.downMachines} units down</> : <><FiCheckCircle /> 100% Operational</>}</p><FiChevronRight className='text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity' /></div>
+            </div>
+          </Link>
+
+          <Link href="/manager/roster" className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden hover:bg-slate-50 transition-colors group'>
+            <div className='relative z-10'>
+              <div className='flex justify-between items-start mb-2'>
+                <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>Staff on Duty (Today)</p>
+                <FiUsers className='text-xl text-purple-500' />
+              </div>
+              <h3 className='text-3xl font-black text-slate-800'>{baseMetrics.staffOnDutyToday}</h3>
+              <div className='flex items-center justify-between mt-2'>
+                <p className='text-xs font-bold text-slate-500'>
+                  {new Date().getDay() === 0 ? 'Clinic closed on Sundays' : 'Nurses clocked in'}
+                </p>
+                <FiChevronRight className='text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity' />
+              </div>
+            </div>
+          </Link>
         </div>
 
-        {/* Primary Path 6: Widgets */}
-        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8'>
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between transition-all hover:shadow-md'>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Occupancy Rate</p>
-              <p className='text-3xl font-black text-slate-800'>{metrics.occupancyRate}%</p>
-            </div>
-            <div className='h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl'>📊</div>
+        {/* FULL WIDTH: CLINICAL SCHEDULE */}
+        <div className='bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden mb-8'>
+          <div className='p-6 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center'>
+            <h2 className='text-lg font-black text-slate-800 flex items-center gap-2'><FiClock className='text-blue-500'/> 14-Day Clinical Schedule</h2>
+            <span className='px-3 py-1 bg-white shadow-sm text-slate-600 text-xs font-bold rounded-lg border border-slate-200'>{dynamicMetrics.totalSessions} Sessions</span>
           </div>
 
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between transition-all hover:shadow-md'>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Confirmed Sessions</p>
-              <p className='text-3xl font-black text-slate-800'>
-                {metrics.confirmedSessions} <span className='text-sm text-slate-400 font-medium'>/ {metrics.totalDailyCapacity}</span>
-              </p>
-            </div>
-            <div className='h-14 w-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl'>✅</div>
-          </div>
-
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between transition-all hover:shadow-md'>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Pending Requests</p>
-              <p className={`text-3xl font-black ${metrics.pendingRequests > 0 ? 'text-amber-500' : 'text-slate-800'}`}>
-                {metrics.pendingRequests}
-              </p>
-            </div>
-            <div className={`h-14 w-14 rounded-full flex items-center justify-center text-2xl ${metrics.pendingRequests > 0 ? 'bg-amber-50 text-amber-500' : 'bg-slate-50 text-slate-400'}`}>🔔</div>
-          </div>
-
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between transition-all hover:shadow-md'>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Nurses on Duty</p>
-              <p className='text-3xl font-black text-slate-800'>{metrics.nursesOnDuty}</p>
-            </div>
-            <div className='h-14 w-14 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl'>🧑‍⚕️</div>
-          </div>
-        </div>
-
-        {/* Booking Module Container */}
-        <div className='bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'>
-          <div className='px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50'>
-            <h2 className='text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2'>
-              {metrics.pendingRequests > 0 && <span className='w-2 h-2 rounded-full bg-amber-500 animate-pulse'></span>}
-              Session Logistics
-            </h2>
-          </div>
-          
-          <div className='p-12 flex flex-col items-center justify-center min-h-[250px]'>
-            {metrics.confirmedSessions === 0 && metrics.pendingRequests === 0 ? (
-              // Alternative Path 4(a).3: Exact Empty State Message
-              <div className='text-center animate-in fade-in'>
-                <div className='text-4xl mb-3'>🗓️</div>
-                <p className='text-slate-500 font-medium text-lg'>No sessions scheduled for this date.</p>
+          <div className='p-6 overflow-y-auto max-h-[600px] custom-scrollbar'>
+            {sortedDates.length === 0 ? (
+              <div className='text-center py-16 opacity-50 bg-slate-50 rounded-2xl border border-slate-100'>
+                <FiCalendar className='text-5xl mx-auto mb-4 text-slate-400' />
+                <h3 className='text-lg font-bold text-slate-700'>No sessions scheduled.</h3>
+                <p className='text-sm text-slate-500 mt-2 max-w-sm mx-auto'>Assign patients a routine schedule below to project upcoming slots.</p>
               </div>
             ) : (
-              <div className='w-full text-center'>
-                <p className='text-slate-600 font-medium mb-4'>
-                  You have {metrics.confirmedSessions} confirmed sessions and {metrics.pendingRequests} pending requests for this date.
-                </p>
-                <Link href='/manager/bookings' className='inline-block px-8 py-3 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 hover:shadow-lg transition-all'>
-                  Review Bookings Pipeline
-                </Link>
+              <div className='space-y-8'>
+                {sortedDates.map(dateStr => {
+                  const dateObj = new Date(dateStr);
+                  const displayDate = dateObj.toLocaleDateString('en-MY', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                  const isToday = dateStr === getLocalISODate(new Date());
+
+                  return (
+                    <div key={dateStr} className='relative'>
+                      <div className={`sticky top-0 z-10 py-3 mb-4 border-b-2 flex justify-between items-end ${isToday ? 'border-blue-500 bg-white' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
+                        <h3 className={`text-lg font-black ${isToday ? 'text-blue-600' : 'text-slate-800'}`}>{isToday ? 'TODAY: ' : ''}{displayDate}</h3>
+                      </div>
+                      <ShiftSection title="Morning Shift (07:00 - 11:00)" sessions={dynamicSchedule[dateStr].Morning} />
+                      <ShiftSection title="Afternoon Shift (12:00 - 16:00)" sessions={dynamicSchedule[dateStr].Afternoon} />
+                      <ShiftSection title="Evening Shift (17:00 - 21:00)" sessions={dynamicSchedule[dateStr].Evening} />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
 
+        {/* FULL WIDTH BOTTOM SECTION: PATIENT DIRECTORY */}
+        <div className='bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden'>
+          <div className='p-6 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4'>
+            <div>
+              <h2 className='text-lg font-black text-slate-800 flex items-center gap-2'><FiUsers className='text-indigo-500'/> Patient Logistics Directory</h2>
+            </div>
+            <div className='relative w-full md:w-72'>
+              <FiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg' />
+              <input type="text" placeholder="Search patient name or IC..." value={patientSearch} onChange={e => setPatientSearch(e.target.value)} className='w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium transition-colors shadow-sm' />
+            </div>
+          </div>
+
+          <div className='overflow-x-auto'>
+            <table className='w-full text-left border-collapse'>
+              <thead>
+                <tr className='bg-white border-b border-slate-200'>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Patient Identity</th>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Infection Status</th>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Schedule Pattern</th>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Dedicated Machine</th>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest text-right'>Actions</th>
+                </tr>
+              </thead>
+              <tbody className='divide-y divide-slate-100'>
+                {filteredPatients.length === 0 ? (
+                  <tr><td colSpan={5} className='p-8 text-center text-slate-500 font-medium'>No patients match your search.</td></tr>
+                ) : (
+                  filteredPatients.map(patient => {
+                    const isInfectious = patient.hepatitis_b_status === 'Positive' || patient.hepatitis_c_status === 'Positive' || patient.hiv_status === 'Positive';
+                    const assignedMachine = patient.assigned_machine;
+
+                    return (
+                      <tr key={patient.patient_id} className='hover:bg-slate-50/50 transition-colors'>
+                        <td className='p-4'>
+                          <div className='flex items-center gap-3'>
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${isInfectious ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'}`}>{patient.users?.user_fullname.charAt(0)}</div>
+                            <div><p className='font-bold text-slate-800'>{patient.users?.user_fullname}</p><p className='text-xs text-slate-500 font-medium'>{patient.users?.user_contact_number}</p></div>
+                          </div>
+                        </td>
+                        <td className='p-4'>
+                          {isInfectious ? (
+                            <span className='px-2 py-1 bg-rose-100 text-rose-700 text-[10px] font-black uppercase tracking-wider rounded border border-rose-200 flex items-center w-max gap-1'><FiAlertTriangle /> Isolation Req</span>
+                          ) : (
+                            <span className='px-2 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-wider rounded flex items-center w-max gap-1'><FiCheckCircle /> Standard</span>
+                          )}
+                        </td>
+                        <td className='p-4'><div className='flex flex-col gap-1'><span className='text-sm font-bold text-slate-700'>{patient.schedule_pattern || 'Not Set'}</span><span className='text-xs text-slate-500'>{patient.preferred_shift || 'No Shift'}</span></div></td>
+                        <td className='p-4'>
+                          {assignedMachine ? (
+                            <div className='flex flex-col gap-1'><span className='text-sm font-bold text-slate-800'>{assignedMachine.serial_number}</span><span className='text-[10px] text-slate-500 font-bold uppercase tracking-wider'>{assignedMachine.model}</span></div>
+                          ) : (<span className='text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200'>Unassigned</span>)}
+                        </td>
+                        <td className='p-4 text-right'><button onClick={() => openPatientModal(patient)} className='px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all inline-flex items-center gap-1.5 shadow-sm'><FiEdit2 /> Manage</button></td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
+      {isPatientModalOpen && selectedPatient && (
+        <div className='fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in'>
+          <div className='bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden'>
+            <div className='px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50'>
+              <h3 className='font-black text-slate-800 text-lg flex items-center gap-2'><FiUser /> Patient Logistics</h3>
+              <button onClick={() => setIsPatientModalOpen(false)} className='text-slate-400 hover:text-slate-600 text-xl font-bold'><FiX /></button>
+            </div>
+            
+            <div className='p-6 max-h-[75vh] overflow-y-auto custom-scrollbar'>
+              <div className='bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 flex flex-col md:flex-row gap-6'>
+                <div className='flex-1'>
+                  <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1'>Patient Identity</p>
+                  <h4 className='text-xl font-black text-slate-800'>{selectedPatient.users?.user_fullname}</h4>
+                  <p className='text-sm font-bold text-slate-500 mt-1'>IC: {selectedPatient.users?.user_ic}</p>
+                </div>
+                <div className='flex-1 border-t md:border-t-0 md:border-l border-slate-200 pt-4 md:pt-0 md:pl-6'>
+                  <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2'>Infection Status</p>
+                  <div className='flex flex-wrap gap-2'>
+                    <span className={`px-2 py-1 text-[10px] font-bold rounded ${selectedPatient.hepatitis_b_status === 'Positive' ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700'}`}>Hep B: {selectedPatient.hepatitis_b_status}</span>
+                    <span className={`px-2 py-1 text-[10px] font-bold rounded ${selectedPatient.hepatitis_c_status === 'Positive' ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700'}`}>Hep C: {selectedPatient.hepatitis_c_status}</span>
+                    <span className={`px-2 py-1 text-[10px] font-bold rounded ${selectedPatient.hiv_status === 'Positive' ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700'}`}>HIV: {selectedPatient.hiv_status}</span>
+                  </div>
+                </div>
+              </div>
+
+              {clashWarning && (
+                <div className='mb-6 p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 shadow-sm animate-in zoom-in-95'>
+                  <FiAlertTriangle className='text-rose-600 text-xl shrink-0 mt-0.5' />
+                  <p className='text-sm font-black text-rose-800 leading-snug'>{clashWarning}</p>
+                </div>
+              )}
+
+              <form id="patient-form" onSubmit={handleSavePatientLogistics} className='space-y-5'>
+                <div className='bg-blue-50 border border-blue-100 p-5 rounded-xl'>
+                  <label className='block text-xs font-black text-blue-800 uppercase tracking-widest mb-2'>Assigned Shift Schedule</label>
+                  <div className='grid grid-cols-2 gap-4'>
+                    <select value={patientForm.schedule_pattern} onChange={e => setPatientForm({...patientForm, schedule_pattern: e.target.value})} className='w-full p-3 bg-white border border-blue-200 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-700'>
+                      <option value="MWF">Mon - Wed - Fri (MWF)</option>
+                      <option value="TTS">Tue - Thu - Sat (TTS)</option>
+                    </select>
+                    <select value={patientForm.preferred_shift} onChange={e => setPatientForm({...patientForm, preferred_shift: e.target.value})} className='w-full p-3 bg-white border border-blue-200 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-700'>
+                      <option value="">-- Unassigned --</option>
+                      <option value="Morning (08:00 - 12:00)">Morning (08:00 - 12:00)</option>
+                      <option value="Afternoon (12:00 - 16:00)">Afternoon (12:00 - 16:00)</option>
+                      <option value="Evening (17:00 - 21:00)">Evening (17:00 - 21:00)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className='bg-amber-50 border border-amber-100 p-5 rounded-xl'>
+                  <label className='block text-xs font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center justify-between'>
+                    Dedicated Machine Assignment
+                    {(selectedPatient.hepatitis_b_status === 'Positive' || selectedPatient.hepatitis_c_status === 'Positive') && <span className='text-[10px] text-rose-600 animate-pulse'>*Isolation Filter Required</span>}
+                  </label>
+                  <select value={patientForm.machine_id} onChange={e => setPatientForm({...patientForm, machine_id: e.target.value})} className={`w-full p-3 bg-white border ${clashWarning ? 'border-rose-400 focus:border-rose-500 ring-2 ring-rose-100' : 'border-amber-200 focus:border-amber-500'} rounded-lg outline-none font-bold text-slate-700`}>
+                    <option value="">-- Unassigned (Floating Pool) --</option>
+                    {branchMachines.map(m => {
+                      const occupiedMachineIds = new Set(branchPatients.filter(p => p.patient_id !== selectedPatient.patient_id && p.schedule_pattern === patientForm.schedule_pattern && p.preferred_shift === patientForm.preferred_shift && p.assigned_machine_id).map(p => p.assigned_machine_id?.toString()));
+                      const mIdStr = m.id.toString();
+                      if (!occupiedMachineIds.has(mIdStr) || patientForm.machine_id === mIdStr) {
+                        return <option key={m.id} value={m.id}>{mIdStr === selectedPatient.assigned_machine_id?.toString() ? '✓ CURRENT: ' : ''} {m.model} (SN: {m.serial_number}) {m.has_endotoxin_filter ? '- [Has Endotoxin Filter]' : ''} {occupiedMachineIds.has(mIdStr) ? ' ⚠️ (CLASH DETECTED)' : ''}</option>;
+                      }
+                      return null;
+                    })}
+                  </select>
+                </div>
+              </form>
+            </div>
+            <div className='p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3'>
+              <button type="button" onClick={() => setIsPatientModalOpen(false)} className='px-6 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors'>Cancel</button>
+              <button form="patient-form" type="submit" disabled={isSaving || !!clashWarning} className='px-8 py-2.5 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md disabled:opacity-50 disabled:bg-slate-400 transition-colors'>{isSaving ? 'Saving...' : 'Save Patient Logistics'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

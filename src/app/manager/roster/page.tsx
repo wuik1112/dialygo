@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
+import { FiActivity } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
   const year = d.getFullYear();
@@ -40,7 +41,6 @@ export default function ManagerWeeklyRoster() {
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [editingShiftId, setEditingShiftId] = useState<number | null>(null);
   
-  // UPDATED: Added Clinical Fields
   const [formData, setFormData] = useState({
     nurse_id: '',
     shift_type: 'WORK', 
@@ -239,7 +239,6 @@ export default function ManagerWeeklyRoster() {
         }
       }
 
-      // Build payload matching the updated Database Schema
       const payload = datesToProcess.map(dateStr => ({
         branch_id: branchData.id,
         nurse_id: nurseId,
@@ -267,7 +266,6 @@ export default function ManagerWeeklyRoster() {
         if (error) throw error;
       }
 
-      // POST-CONDITION UC-07: Send In-App Notification
       const nurseDetails = nurses.find(n => n.user_id === nurseId);
       const actionType = modalMode === 'add' ? 'Assigned to' : 'Updated';
       const notifMsg = isWork 
@@ -324,7 +322,16 @@ export default function ManagerWeeklyRoster() {
     setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
   };
 
-  if (isLoading && !branchData) return <div className='p-8 text-center text-slate-500 mt-20'>Loading Duty Roster Engine...</div>;
+  if (isLoading && !branchData) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Loading Duty Roster Engine...</span>
+        </div>
+      </div>
+    );
+  }
 
   const getShiftStyles = (type: string) => {
     switch(type) {
@@ -422,7 +429,6 @@ export default function ManagerWeeklyRoster() {
                 const nurseShifts = weeklyRoster.filter(s => s.nurse_id === nurse.user_id);
                 let totalHours = 0;
                 
-                // UPDATED MATH: Deducts break time!
                 nurseShifts.forEach(s => {
                   if (s.shift_type === 'WORK' && s.start_time && s.end_time) {
                     const grossHours = (timeToMins(s.end_time) - timeToMins(s.start_time)) / 60;

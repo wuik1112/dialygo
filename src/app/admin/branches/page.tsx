@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useLoadScript, Autocomplete, GoogleMap, Marker } from '@react-google-maps/api';
+import { FiActivity } from 'react-icons/fi';
 
 const libraries: any = ['places'];
 
@@ -239,7 +240,16 @@ export default function BranchManagement() {
 
   const filteredBranches = branches.filter(b => filter === 'All' ? true : b.status === filter);
 
-  if (isLoading) return <div className='p-8 text-slate-600 font-sans text-center mt-20'>Fetching DialyGo Network Data...</div>;
+  if (isLoading) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Fetching DialyGo Network Data...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans relative'>

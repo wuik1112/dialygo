@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { FiActivity } from 'react-icons/fi';
 
 export default function SystemRules() {
   const [rules, setRules] = useState<any[]>([]);
@@ -95,7 +96,16 @@ export default function SystemRules() {
     setSavingId(null);
   };
 
-  if (isLoading) return <div className='p-8 text-slate-600 font-sans text-center mt-20'>Loading Global Parameters...</div>;
+  if (isLoading) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Loading Global Parameters...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans'>

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
+import { FiActivity } from 'react-icons/fi';
 
 export default function ManagerSettings() {
   const [isLoading, setIsLoading] = useState(true);
@@ -29,7 +30,7 @@ export default function ManagerSettings() {
     confirm_password: '',
     branch_contact: '',
     branch_address: '',
-    gallery_photos: [] as string[], // NEW: Array for multiple photos
+    gallery_photos: [] as string[],
     amenities: [] as string[]
   });
 
@@ -160,7 +161,6 @@ export default function ManagerSettings() {
     setPasswordVerification(signInError ? 'invalid' : 'valid');
   };
 
-  // SINGLE PROFILE PHOTO UPLOAD
   const handleProfileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const file = e.target.files?.[0];
@@ -186,7 +186,6 @@ export default function ManagerSettings() {
     }
   };
 
-  // MULTIPLE GALLERY PHOTO UPLOAD
   const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const files = e.target.files;
@@ -197,7 +196,6 @@ export default function ManagerSettings() {
 
       const newUrls: string[] = [];
 
-      // Loop through all selected files and upload them
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (file.size > 2 * 1024 * 1024) throw new Error(`File ${file.name} is larger than 2MB.`);
@@ -218,7 +216,6 @@ export default function ManagerSettings() {
       alert(`Upload failed: ${error.message}`);
     } finally {
       setIsUploadingGallery(false);
-      // Reset the file input so the same files can be selected again if needed
       e.target.value = ''; 
     }
   };
@@ -322,7 +319,16 @@ export default function ManagerSettings() {
     }
   };
 
-  if (isLoading) return <div className='p-8 text-slate-600 font-sans text-center mt-20'>Loading Manager Profile...</div>;
+  if (isLoading) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Loading Manager Profile...</span>
+        </div>
+      </div>
+    );
+  }
 
   const CheckItem = ({ isValid, text }: { isValid: boolean, text: string }) => (
     <li className={`flex items-center gap-2 transition-colors duration-300 ${isValid ? 'text-emerald-600' : 'text-slate-400'}`}>

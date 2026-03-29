@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useParams } from 'next/navigation';
+import { FiActivity } from 'react-icons/fi';
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -78,7 +79,16 @@ export default function NotificationsPage() {
     setIsProcessing(false);
   };
 
-  if (isLoading) return <div className='p-8 text-center text-slate-500 mt-20'>Accessing your alerts...</div>;
+  if (isLoading) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'>
+          <FiActivity className='text-4xl mb-4 animate-spin' />
+          <span>Accessing your alerts...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans pb-24'>
