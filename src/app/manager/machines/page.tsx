@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { 
   FiSearch, FiFilter, FiDatabase, FiUsers, FiLock, 
   FiSettings, FiInbox, FiImage, FiShield, FiAlertTriangle, 
-  FiEye, FiDroplet, FiCamera, FiCheckCircle, FiZoomIn, FiX, FiActivity
+  FiEye, FiDroplet, FiCamera, FiCheckCircle, FiZoomIn, FiX, FiActivity, FiMapPin, FiTrash2, FiLoader
 } from 'react-icons/fi';
 
 const formatDateDisplay = (dateStr: string | null) => {
@@ -534,7 +534,7 @@ export default function ManagerMachineStatus() {
                       )}
                       <div className='mt-2 px-1'>
                         <input type="file" accept="image/*" onChange={handlePhotoUpload} disabled={isUploadingPhoto} className='w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300 transition-all cursor-pointer' />
-                        {isUploadingPhoto && <p className='text-xs font-bold text-blue-600 animate-pulse mt-2 text-center'>Uploading to secure storage...</p>}
+                        {isUploadingPhoto && <p className='text-xs font-bold text-blue-600 flex items-center justify-center gap-1 mt-2'><FiLoader className='animate-spin' /> Uploading to secure storage...</p>}
                       </div>
                     </div>
                   </div>
@@ -542,7 +542,6 @@ export default function ManagerMachineStatus() {
                   <div className='p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4'>
                     <h4 className='text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2'>Hardware Identity</h4>
                     
-                    {/* DATALISTS FOR AUTOCOMPLETE */}
                     <datalist id="manufacturer-options">
                       {uniqueManufacturers.map(m => <option key={m} value={m} />)}
                     </datalist>
@@ -601,7 +600,7 @@ export default function ManagerMachineStatus() {
                       <select value={formData.dedicated_patient_id} onChange={e => { const newId = e.target.value; setFormData(prev => ({ ...prev, dedicated_patient_id: newId, status: newId ? (prev.status === 'Active' ? 'Reserved' : prev.status) : (prev.status === 'Reserved' ? 'Active' : prev.status) })); }} className='w-full p-3 bg-white border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800'>
                         <option value="">Floating Pool (Available to Visitors)</option>
                         <optgroup label="Dedicated To Patient:">
-                          {patients.map(p => <option key={p.patient_id} value={p.patient_id}>🔒 {p.users?.user_fullname}</option>)}
+                          {patients.map(p => <option key={p.patient_id} value={p.patient_id}>[Dedicated] {p.users?.user_fullname}</option>)}
                         </optgroup>
                       </select>
                     </div>
@@ -662,7 +661,7 @@ export default function ManagerMachineStatus() {
               </div>
 
               {message.text && (
-                <div className={`mt-6 p-4 rounded-xl font-bold text-sm border flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                <div className={`mt-6 p-4 rounded-xl font-bold text-sm border flex items-center gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
                   <span className='mt-0.5 text-lg'>{message.type === 'success' ? <FiCheckCircle /> : <FiAlertTriangle />}</span>
                   <span>{message.text}</span>
                 </div>

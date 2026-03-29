@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useLoadScript, Autocomplete, GoogleMap, Marker } from '@react-google-maps/api';
-import { FiActivity } from 'react-icons/fi';
+import { FiActivity, FiMapPin, FiHome, FiZoomIn, FiTrash2, FiLoader } from 'react-icons/fi';
 
 const libraries: any = ['places'];
 
@@ -275,7 +275,6 @@ export default function BranchManagement() {
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
           {filteredBranches.map(branch => {
             const isActive = branch.status === 'Active';
-            // Changed from m.id to m.user_id
             const assignedManager = managers.find(m => m.user_id === branch.manager_id);
 
             return (
@@ -289,7 +288,7 @@ export default function BranchManagement() {
                 
                 <div className='space-y-4 flex-1 mb-6'>
                   <div className='flex items-start gap-3'>
-                    <div className='mt-1 text-slate-400'>📍</div>
+                    <div className='mt-1 text-slate-400'><FiMapPin /></div>
                     <p className='text-sm text-slate-600 line-clamp-2 leading-relaxed'>{branch.branch_address}</p>
                   </div>
                   
@@ -343,7 +342,6 @@ export default function BranchManagement() {
                     <div>
                       <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Branch Manager</h3>
                       <p className='text-sm font-semibold text-slate-800'>
-                        {/* Changed from m.id to m.user_id */}
                         {managers.find(m => m.user_id === selectedBranch.manager_id)?.user_fullname || 'Unassigned'}
                       </p>
                     </div>
@@ -439,7 +437,6 @@ export default function BranchManagement() {
                       <select name='manager_id' required className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 appearance-none' value={formData.manager_id} onChange={handleInputChange}>
                         <option value=''>Select available manager...</option>
                         {managers.map(m => (
-                          // Changed from m.id to m.user_id
                           <option key={m.user_email} value={m.user_id.toString()}>{m.user_fullname}</option>
                         ))}
                       </select>

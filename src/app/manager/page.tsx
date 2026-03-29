@@ -6,7 +6,8 @@ import {
   FiUsers, FiInbox, FiSettings, FiActivity, 
   FiClock, FiAlertTriangle, FiCheckCircle, 
   FiChevronRight, FiMapPin, FiCalendar, FiShield,
-  FiUser, FiEdit2, FiDroplet, FiFileText, FiEye, FiX, FiSearch
+  FiUser, FiEdit2, FiDroplet, FiX, FiSearch,
+  FiMap, FiHome
 } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
@@ -21,6 +22,7 @@ export default function ManagerDashboard() {
   const [branchData, setBranchData] = useState<any>(null);
   const [managerName, setManagerName] = useState('');
   
+  const [timeFilter, setTimeFilter] = useState<'Today' | 'Week' | 'Month' | 'Year'>('Week');
   const [patientSearch, setPatientSearch] = useState('');
 
   const [dbBookings, setDbBookings] = useState<any[]>([]);
@@ -76,7 +78,6 @@ export default function ManagerDashboard() {
       }));
       setBranchPatients(patientsWithMachines);
 
-      // Fetch 14-day rolling window for physical DB records
       const now = new Date();
       const startDateStr = getLocalISODate(now);
       
@@ -97,7 +98,6 @@ export default function ManagerDashboard() {
       const activeMachines = machinesData?.filter(m => m.status === 'Active' || m.status === 'Reserved').length || 0;
       const downMachines = machinesData?.filter(m => m.status === 'Under Maintenance' || m.status === 'Faulty').length || 0;
 
-      // Staff on duty strictly for TODAY
       const isSunday = now.getDay() === 0;
       let staffOnDutyToday = 0;
 
@@ -130,14 +130,11 @@ export default function ManagerDashboard() {
     fetchDashboardData();
   }, []);
 
-  // ============================================================================
-  // DYNAMIC SCHEDULE CALCULATOR (Rolling 14 Days)
-  // ============================================================================
   const { dynamicSchedule, dynamicMetrics } = useMemo(() => {
     const now = new Date();
     const startDate = new Date(now);
     const endDate = new Date(now);
-    endDate.setDate(now.getDate() + 14); // 14 Day Projection
+    endDate.setDate(now.getDate() + 14);
 
     const dateArray: string[] = [];
     let curr = new Date(startDate);
@@ -200,9 +197,6 @@ export default function ManagerDashboard() {
 
   const sortedDates = Object.keys(dynamicSchedule).sort();
 
-  // =================================================================
-  // LOGISTICS HANDLING
-  // =================================================================
   useEffect(() => {
     if (!patientForm.machine_id || !patientForm.schedule_pattern || !patientForm.preferred_shift || !selectedPatient) {
       setClashWarning(null); return;
@@ -210,7 +204,7 @@ export default function ManagerDashboard() {
     const conflictingPatient = branchPatients.find(p => p.patient_id !== selectedPatient.patient_id && p.assigned_machine_id?.toString() === patientForm.machine_id && p.schedule_pattern === patientForm.schedule_pattern && p.preferred_shift === patientForm.preferred_shift);
     if (conflictingPatient) {
       const machineInfo = branchMachines.find(m => m.id.toString() === patientForm.machine_id);
-      setClashWarning(`CLASH: Machine ${machineInfo?.serial_number} is already assigned to ${conflictingPatient.users?.user_fullname} during this timeframe.`);
+      setClashWarning(`CLASH DETECTED: Machine ${machineInfo?.serial_number} is already assigned to ${conflictingPatient.users?.user_fullname} during this timeframe.`);
     } else { setClashWarning(null); }
   }, [patientForm, branchPatients, selectedPatient, branchMachines]);
 
@@ -263,7 +257,9 @@ export default function ManagerDashboard() {
                 <div className='flex justify-between items-start mb-2'>
                   <div>
                     <h4 className='font-bold text-slate-800 text-sm truncate max-w-[150px]' title={patient?.users?.user_fullname}>{patient?.users?.user_fullname}</h4>
-                    <p className='text-xs text-slate-500 mt-0.5'>{session.booking_type === 'Travel' ? '✈️ Travel Guest' : '🏠 Home Patient'}</p>
+                    <p className='text-xs text-slate-500 mt-0.5 flex items-center gap-1.5'>
+                      {session.booking_type === 'Travel' ? <><FiMap /> Travel Guest</> : <><FiHome /> Home Patient</>}
+                    </p>
                   </div>
                   {isInfectious && <span className='px-2 py-1 bg-rose-600 text-white text-[9px] font-black uppercase tracking-wider rounded flex items-center gap-1 shrink-0'><FiAlertTriangle /> Isolation</span>}
                 </div>
@@ -294,16 +290,14 @@ export default function ManagerDashboard() {
     <main className='p-8 bg-slate-50 min-h-screen font-sans pb-24'>
       <div className='max-w-7xl mx-auto'>
         
-        {/* HEADER */}
         <div className='flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4'>
           <div>
             <p className='text-sm font-bold text-blue-600 mb-1 flex items-center gap-2'><FiCalendar /> {new Date().toLocaleDateString('en-MY', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-            <h1 className='text-3xl font-black text-slate-800 tracking-tight'>Branch Dashboard</h1>
+            <h1 className='text-3xl font-black text-slate-800 tracking-tight'>Command Center</h1>
             <p className='text-slate-500 mt-1 font-medium flex items-center gap-1.5'><FiMapPin /> {branchData?.branch_name} | {managerName}</p>
           </div>
         </div>
 
-        {/* GLOBAL SYSTEM ALERTS */}
         {(baseMetrics.pendingRequests > 0 || baseMetrics.downMachines > 0) && (
           <div className='mb-8 flex flex-col gap-3'>
             {baseMetrics.pendingRequests > 0 && (
@@ -327,15 +321,12 @@ export default function ManagerDashboard() {
           </div>
         )}
 
-        {/* KPI METRICS GRID */}
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
-          
           <div className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden'>
             <div className='absolute right-0 top-0 w-24 h-24 bg-blue-50 rounded-bl-full opacity-50'></div>
             <div className='relative z-10'>
               <div className='flex justify-between items-start mb-2'><p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>Upcoming Sessions</p><FiActivity className='text-xl text-blue-500' /></div>
               <h3 className='text-3xl font-black text-slate-800'>{dynamicMetrics.totalSessions}</h3>
-              <p className='text-xs font-bold text-slate-500 mt-2'>{dynamicMetrics.isolationCases > 0 ? <span className='text-rose-600 flex items-center gap-1'><FiShield /> {dynamicMetrics.isolationCases} isolation protocols</span> : 'All standard clearance'}</p>
             </div>
           </div>
 
@@ -343,7 +334,6 @@ export default function ManagerDashboard() {
             <div className='relative z-10'>
               <div className='flex justify-between items-start mb-2'><p className={`text-[10px] font-black uppercase tracking-widest ${baseMetrics.pendingRequests > 0 ? 'text-amber-700' : 'text-slate-400'}`}>Pending Approvals</p><FiInbox className={`text-xl ${baseMetrics.pendingRequests > 0 ? 'text-amber-600' : 'text-slate-400'}`} /></div>
               <h3 className={`text-3xl font-black ${baseMetrics.pendingRequests > 0 ? 'text-amber-800' : 'text-slate-800'}`}>{baseMetrics.pendingRequests}</h3>
-              <p className={`text-xs font-bold mt-2 flex items-center gap-1 ${baseMetrics.pendingRequests > 0 ? 'text-amber-600' : 'text-slate-500'}`}>View Pipeline <FiChevronRight className='opacity-0 group-hover:opacity-100 transition-opacity' /></p>
             </div>
           </Link>
 
@@ -351,7 +341,6 @@ export default function ManagerDashboard() {
             <div className='relative z-10'>
               <div className='flex justify-between items-start mb-2'><p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>Machine Status</p><FiSettings className='text-xl text-slate-400' /></div>
               <div className='flex items-baseline gap-2'><h3 className='text-3xl font-black text-slate-800'>{baseMetrics.activeMachines}</h3><span className='text-sm font-bold text-slate-500'>Active</span></div>
-              <div className='flex items-center justify-between mt-2'><p className={`text-xs font-bold ${baseMetrics.downMachines > 0 ? 'text-rose-600 flex items-center gap-1' : 'text-emerald-600 flex items-center gap-1'}`}>{baseMetrics.downMachines > 0 ? <><FiAlertTriangle /> {baseMetrics.downMachines} units down</> : <><FiCheckCircle /> 100% Operational</>}</p><FiChevronRight className='text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity' /></div>
             </div>
           </Link>
 
@@ -362,17 +351,10 @@ export default function ManagerDashboard() {
                 <FiUsers className='text-xl text-purple-500' />
               </div>
               <h3 className='text-3xl font-black text-slate-800'>{baseMetrics.staffOnDutyToday}</h3>
-              <div className='flex items-center justify-between mt-2'>
-                <p className='text-xs font-bold text-slate-500'>
-                  {new Date().getDay() === 0 ? 'Clinic closed on Sundays' : 'Nurses clocked in'}
-                </p>
-                <FiChevronRight className='text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity' />
-              </div>
             </div>
           </Link>
         </div>
 
-        {/* FULL WIDTH: CLINICAL SCHEDULE */}
         <div className='bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden mb-8'>
           <div className='p-6 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center'>
             <h2 className='text-lg font-black text-slate-800 flex items-center gap-2'><FiClock className='text-blue-500'/> 14-Day Clinical Schedule</h2>
@@ -384,7 +366,6 @@ export default function ManagerDashboard() {
               <div className='text-center py-16 opacity-50 bg-slate-50 rounded-2xl border border-slate-100'>
                 <FiCalendar className='text-5xl mx-auto mb-4 text-slate-400' />
                 <h3 className='text-lg font-bold text-slate-700'>No sessions scheduled.</h3>
-                <p className='text-sm text-slate-500 mt-2 max-w-sm mx-auto'>Assign patients a routine schedule below to project upcoming slots.</p>
               </div>
             ) : (
               <div className='space-y-8'>
@@ -409,7 +390,6 @@ export default function ManagerDashboard() {
           </div>
         </div>
 
-        {/* FULL WIDTH BOTTOM SECTION: PATIENT DIRECTORY */}
         <div className='bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden'>
           <div className='p-6 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4'>
             <div>
@@ -532,7 +512,7 @@ export default function ManagerDashboard() {
                       const occupiedMachineIds = new Set(branchPatients.filter(p => p.patient_id !== selectedPatient.patient_id && p.schedule_pattern === patientForm.schedule_pattern && p.preferred_shift === patientForm.preferred_shift && p.assigned_machine_id).map(p => p.assigned_machine_id?.toString()));
                       const mIdStr = m.id.toString();
                       if (!occupiedMachineIds.has(mIdStr) || patientForm.machine_id === mIdStr) {
-                        return <option key={m.id} value={m.id}>{mIdStr === selectedPatient.assigned_machine_id?.toString() ? '✓ CURRENT: ' : ''} {m.model} (SN: {m.serial_number}) {m.has_endotoxin_filter ? '- [Has Endotoxin Filter]' : ''} {occupiedMachineIds.has(mIdStr) ? ' ⚠️ (CLASH DETECTED)' : ''}</option>;
+                        return <option key={m.id} value={m.id}>{mIdStr === selectedPatient.assigned_machine_id?.toString() ? '[CURRENT] ' : ''} {m.model} (SN: {m.serial_number}) {m.has_endotoxin_filter ? '- [Has Endotoxin Filter]' : ''} {occupiedMachineIds.has(mIdStr) ? ' [CLASH DETECTED]' : ''}</option>;
                       }
                       return null;
                     })}

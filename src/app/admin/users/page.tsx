@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
-import { FiActivity } from 'react-icons/fi';
+import { FiPhone, FiMapPin, FiLock, FiArrowUp, FiArrowDown, FiMinus, FiActivity } from 'react-icons/fi';
 
 const roleMap: Record<number, string> = {
   1: 'HQ Admin',
@@ -16,18 +16,15 @@ export default function UserManagement() {
   const [branches, setBranches] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Advanced Filter States
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [filterRole, setFilterRole] = useState<number | 'All'>('All');
   const [filterBranch, setFilterBranch] = useState<number | 'All' | 'Network'>('All');
 
-  // Sorting & Pagination States
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'user_fullname', direction: 'asc' });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -42,10 +39,8 @@ export default function UserManagement() {
     contact_number: '',
     role_id: '',
     branch_id: '',
-    // Patient Fields
     patient_address: '',
     blood_type: '',
-    // Staff Fields
     license_number: '',
     max_hours: '48',
     employment_status: 'Full-Time'
@@ -101,11 +96,9 @@ export default function UserManagement() {
       role_id: user.role_id ? user.role_id.toString() : '',
       branch_id: user.branch_id ? user.branch_id.toString() : '',
       
-      // Map Patient Data
       patient_address: patientData?.patient_address || '',
       blood_type: patientData?.patient_blood_type || '',
       
-      // Map Staff Data
       license_number: staffData?.professional_license_number || '',
       max_hours: staffData?.max_weekly_hours?.toString() || '48',
       employment_status: staffData?.employment_status || 'Full-Time'
@@ -150,15 +143,10 @@ export default function UserManagement() {
       branch_id: formData.branch_id ? parseInt(formData.branch_id) : null
     };
 
-    // SECURITY FIX: Plain text passwords are no longer attached to userPayload!
-
     try {
       let targetUserId = editingId;
 
-      // 1. Process User Table
       if (editingId) {
-        
-        // --- SECURE AUTH UPDATE ---
         if (formData.password.trim()) {
           const authRes = await fetch('/api/admin/update-user', {
             method: 'POST',
@@ -172,12 +160,9 @@ export default function UserManagement() {
         if (updateError) throw updateError;
         
       } else {
-        
-        // --- SECURE AUTH CREATION ---
         if (!formData.password) throw new Error('Password is required for new users.');
         userPayload.user_is_active = true; 
 
-        // 1. Safely create user in Supabase Auth via our backend
         const authRes = await fetch('/api/admin/create-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -189,13 +174,11 @@ export default function UserManagement() {
           throw new Error(errData.error || "Failed to create user in secure auth. Ensure password is > 6 characters.");
         }
 
-        // 2. Safely create the public profile record (NO password stored here)
         const { data: newUser, error: insertError } = await supabase.from('users').insert([userPayload]).select();
         if (insertError) throw insertError;
         targetUserId = newUser[0].user_id;
       }
 
-      // 2. Process Extended Tables (Staff or Patients)
       if (roleIdNum === 5) {
         const patientPayload = {
           user_id: targetUserId,
@@ -295,8 +278,8 @@ export default function UserManagement() {
   const currentUsers = sortedUsers.slice(indexOfFirstItem, indexOfLastItem);
 
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
-    if (sortConfig.key !== columnKey) return <span className="text-slate-300 ml-1">↕</span>;
-    return sortConfig.direction === 'asc' ? <span className="text-blue-600 ml-1">↑</span> : <span className="text-blue-600 ml-1">↓</span>;
+    if (sortConfig.key !== columnKey) return <FiMinus className="text-slate-300 ml-1 inline-block" />;
+    return sortConfig.direction === 'asc' ? <FiArrowUp className="text-blue-600 ml-1 inline-block" /> : <FiArrowDown className="text-blue-600 ml-1 inline-block" />;
   };
 
   if (isLoading) {
@@ -323,7 +306,6 @@ export default function UserManagement() {
           </button>
         </div>
 
-        {/* Filters */}
         <div className='bg-white p-5 rounded-2xl shadow-sm border border-slate-200 mb-6'>
           <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
             <div className='md:col-span-1'>
@@ -360,7 +342,6 @@ export default function UserManagement() {
           </div>
         </div>
 
-        {/* Data Table */}
         <div className='bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'>
           <div className='overflow-x-auto'>
             <table className='min-w-full divide-y divide-slate-200'>
@@ -400,7 +381,7 @@ export default function UserManagement() {
                             <div className='ml-4'>
                               <div className='text-sm font-bold text-slate-900'>{user.user_fullname}</div>
                               <div className='text-sm text-slate-500'>{user.user_email}</div>
-                              <div className='text-xs text-slate-400 mt-0.5'>📞 {user.user_contact_number || 'No Contact'}</div>
+                              <div className='text-xs text-slate-400 mt-0.5 flex items-center gap-1.5'><FiPhone /> {user.user_contact_number || 'No Contact'}</div>
                             </div>
                           </div>
                         </td>
@@ -412,7 +393,7 @@ export default function UserManagement() {
                           <span className='px-2.5 py-1 inline-flex text-xs leading-5 font-bold rounded-md bg-blue-50 text-blue-700 mb-1 border border-blue-100'>
                             {roleMap[user.role_id] || 'Unknown Role'}
                           </span>
-                          <div className='text-xs text-slate-500 font-medium truncate max-w-[200px]'>📍 {branchName}</div>
+                          <div className='text-xs text-slate-500 font-medium truncate max-w-[200px] flex items-center gap-1.5'><FiMapPin /> {branchName}</div>
                         </td>
                         <td className='px-6 py-4 whitespace-nowrap'>
                           <span className={`px-2.5 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${user.user_is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
@@ -433,7 +414,6 @@ export default function UserManagement() {
             </table>
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className='px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between'>
               <div className='text-sm text-slate-600 font-medium'>
@@ -449,7 +429,6 @@ export default function UserManagement() {
         </div>
       </div>
 
-      {/* Dynamic User Modal */}
       {isModalOpen && (
         <div className='fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4'>
           <div className='bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200'>
@@ -462,7 +441,6 @@ export default function UserManagement() {
             
             <form onSubmit={handleSaveUser} className='p-8 overflow-y-auto max-h-[75vh]'>
               
-              {/* Core Identity Section */}
               <div className='mb-6'>
                 <h3 className='text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 mb-4'>Core Identity</h3>
                 <div className='grid grid-cols-2 gap-5'>
@@ -497,7 +475,6 @@ export default function UserManagement() {
                 </div>
               </div>
 
-              {/* Roles and Assignments */}
               <div className='mb-6'>
                 <h3 className='text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 mb-4'>System Access</h3>
                 <div className='grid grid-cols-2 gap-5'>
@@ -522,7 +499,6 @@ export default function UserManagement() {
                 </div>
               </div>
 
-              {/* Dynamic Form Segment: Staff Only (Roles 1-4) */}
               {['1', '2', '3', '4'].includes(formData.role_id) && (
                 <div className='mb-6 animate-in fade-in slide-in-from-top-4 duration-300'>
                   <h3 className='text-sm font-bold text-blue-800 border-b border-blue-200 pb-2 mb-4'>Professional Profile</h3>
@@ -547,7 +523,6 @@ export default function UserManagement() {
                 </div>
               )}
 
-              {/* Dynamic Form Segment: Patient Only (Role 5) */}
               {formData.role_id === '5' && (
                 <div className='mb-6 animate-in fade-in slide-in-from-top-4 duration-300'>
                   <h3 className='text-sm font-bold text-emerald-700 border-b border-emerald-200 pb-2 mb-4'>Patient Logistics</h3>
@@ -566,9 +541,8 @@ export default function UserManagement() {
                       </select>
                     </div>
 
-                    {/* PDPA Data Masking Block */}
                     <div className='col-span-2 mt-2 bg-slate-100/70 p-4 rounded-xl border border-slate-200 flex items-center gap-4'>
-                      <div className='text-2xl'>🔒</div>
+                      <div className='text-2xl text-slate-400'><FiLock /></div>
                       <div>
                         <p className='text-sm font-bold text-slate-700'>Clinical Data Restricted</p>
                         <p className='text-xs text-slate-500 mt-1'>Hepatitis Serology and medical clearance inputs are masked for administrative staff in compliance with PDPA. Clinical staff will update these records separately.</p>

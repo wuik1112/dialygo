@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
-import { FiActivity } from 'react-icons/fi';
+import { FiCheckCircle, FiCircle, FiXCircle, FiAlertTriangle, FiInfo, FiLoader, FiCamera, FiActivity } from 'react-icons/fi';
 
 export default function AdminSettings() {
   const [isLoading, setIsLoading] = useState(true);
@@ -35,7 +35,6 @@ export default function AdminSettings() {
       if (sessionData.session) {
         const email = sessionData.session.user.email;
         
-        // Only fetch the users table, Admin doesn't need staff data here
         const { data: userData } = await supabase
           .from('users')
           .select('*')
@@ -179,7 +178,7 @@ export default function AdminSettings() {
 
   const CheckItem = ({ isValid, text }: { isValid: boolean, text: string }) => (
     <li className={`flex items-center gap-2 transition-colors duration-300 ${isValid ? 'text-emerald-600' : 'text-slate-400'}`}>
-      <span>{isValid ? '✅' : '⚪'}</span>
+      <span>{isValid ? <FiCheckCircle /> : <FiCircle />}</span>
       <span className={isValid ? 'font-medium' : ''}>{text}</span>
     </li>
   );
@@ -235,7 +234,7 @@ export default function AdminSettings() {
             <div className='p-8 space-y-6'>
               
               <div className={`p-5 rounded-xl border flex items-start gap-4 transition-colors duration-300 ${formData.new_password.length > 0 && !allRequirementsMet ? 'bg-amber-50 border-amber-200' : 'bg-blue-50/50 border-blue-100'}`}>
-                <div className='text-xl'>{formData.new_password.length > 0 && !allRequirementsMet ? '⚠️' : 'ℹ️'}</div>
+                <div className='text-xl'>{formData.new_password.length > 0 && !allRequirementsMet ? <FiAlertTriangle className='text-amber-500'/> : <FiInfo className='text-blue-500'/>}</div>
                 <div className='text-sm text-slate-600 leading-relaxed w-full'>
                   <p className='mb-2 font-bold text-slate-800'>Secure Password Requirements:</p>
                   <ul className='grid grid-cols-1 md:grid-cols-2 gap-2 text-xs'>
@@ -258,9 +257,9 @@ export default function AdminSettings() {
                     className={`w-full p-3.5 pr-12 bg-slate-50 border rounded-xl outline-none focus:border-blue-500 font-medium text-slate-800 transition-colors ${passwordVerification === 'invalid' ? 'border-red-400 focus:border-red-500 bg-red-50' : passwordVerification === 'valid' ? 'border-emerald-400 bg-emerald-50/30' : 'border-slate-200'}`}
                   />
                   <div className='absolute right-4 top-1/2 -translate-y-1/2 text-lg'>
-                    {passwordVerification === 'checking' && <span className="animate-spin inline-block text-blue-500">⏳</span>}
-                    {passwordVerification === 'valid' && <span className="text-emerald-500">✅</span>}
-                    {passwordVerification === 'invalid' && <span className="text-red-500">❌</span>}
+                    {passwordVerification === 'checking' && <span className="flex items-center"><FiLoader className='animate-spin text-blue-500'/></span>}
+                    {passwordVerification === 'valid' && <span className="flex items-center"><FiCheckCircle className='text-emerald-500'/></span>}
+                    {passwordVerification === 'invalid' && <span className="flex items-center"><FiXCircle className='text-red-500'/></span>}
                   </div>
                 </div>
                 {passwordVerification === 'invalid' && <p className='text-xs font-bold text-red-500 mt-2 animate-in fade-in'>Incorrect current password. Please try again.</p>}
@@ -282,7 +281,7 @@ export default function AdminSettings() {
 
           {message.text && (
             <div className={`p-4 rounded-xl font-bold text-sm border animate-in fade-in duration-300 flex items-center gap-3 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-              <span>{message.type === 'success' ? '✅' : '❌'}</span>
+              <span>{message.type === 'success' ? <FiCheckCircle /> : <FiXCircle />}</span>
               <span>{message.text}</span>
             </div>
           )}

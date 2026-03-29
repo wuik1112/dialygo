@@ -7,7 +7,6 @@ export default function SystemRules() {
   const [rules, setRules] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Track inputs and loading states independently for each rule
   const [inputValues, setInputValues] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Record<number, { type: string, text: string }>>({});
@@ -18,7 +17,6 @@ export default function SystemRules() {
     
     if (data) {
       setRules(data);
-      // Initialize the input state with the current database values
       const initialValues: Record<number, string> = {};
       data.forEach(rule => {
         initialValues[rule.rule_id] = rule.rule_value?.toString() || '';
@@ -89,7 +87,6 @@ export default function SystemRules() {
         setMessages(prev => ({ ...prev, [rule.rule_id]: { type: '', text: '' } }));
       }, 3000);
       
-      // Update local state to reflect the saved value so the button disables again
       setRules(prevRules => prevRules.map(r => r.rule_id === rule.rule_id ? { ...r, rule_value: numericValue } : r));
     }
     

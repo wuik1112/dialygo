@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
-import { FiActivity } from 'react-icons/fi';
+import { FiActivity, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
   const year = d.getFullYear();
@@ -531,7 +531,6 @@ export default function ManagerWeeklyRoster() {
                 </div>
               )}
 
-              {/* NEW CLINICAL BLOCK */}
               {formData.shift_type === 'WORK' && (
                 <div className='p-5 bg-blue-50/50 border border-blue-100 rounded-xl space-y-4 animate-in slide-in-from-top-2'>
                   <div className='grid grid-cols-2 gap-4'>
@@ -582,7 +581,7 @@ export default function ManagerWeeklyRoster() {
 
               {message.text && (
                 <div className={`p-4 rounded-xl font-bold text-sm border flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                  <span className='mt-0.5'>{message.type === 'success' ? '✅' : '❌'}</span>
+                  <span className='mt-0.5 text-lg'>{message.type === 'success' ? <FiCheckCircle /> : <FiXCircle />}</span>
                   <span>{message.text}</span>
                 </div>
               )}

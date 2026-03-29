@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { FiActivity } from 'react-icons/fi';
+import { FiUsers, FiSettings, FiBarChart2, FiActivity } from 'react-icons/fi';
 
 export default function AdminDashboard() {
   const [data, setData] = useState<any>(null);
@@ -11,7 +11,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     async function fetchDashboardData() {
       try {
-        // 1. Fetch all required tables
         const [branchesRes, bookingsRes, patientsRes, usersRes] = await Promise.all([
           supabase.from('branches').select('*').eq('status', 'Active'),
           supabase.from('bookings').select('booking_date, booking_session_time, branch_id, patient_id, booking_status'),
@@ -26,10 +25,8 @@ export default function AdminDashboard() {
         const patients = patientsRes.data || [];
         const users = usersRes.data || [];
 
-        // 2. Calculate Total Active Patients (Role 5 = Patient)
         const totalActivePatients = users.filter(u => u.role_id === 5 && u.user_is_active).length;
 
-        // 3. Calculate Network Capacity
         let totalNetworkMachines = 0;
         let totalAvailableSlots = 0;
         
@@ -45,7 +42,6 @@ export default function AdminDashboard() {
 
         const networkUtilization = totalNetworkMachines ? Math.round(((totalNetworkMachines - totalAvailableSlots) / totalNetworkMachines) * 100) : 0;
 
-        // 4. Calculate Popular Session Times (Updated for True Bar Chart)
         let morning = 0, afternoon = 0, evening = 0;
         bookings.forEach(b => {
           const shift = b.booking_session_time?.toLowerCase();
@@ -55,16 +51,13 @@ export default function AdminDashboard() {
         });
         
         const totalSessions = morning + afternoon + evening;
-        // Find the highest value to set the 100% height scale (minimum 1 to prevent division by zero)
         const maxSessionLoad = Math.max(morning, afternoon, evening, 1);
 
-        // 5. Calculate Cross-Branch Visits (Guest Bookings)
         const crossBranchVisits = bookings.filter(b => {
           const patientProfile = patients.find(p => p.user_id === b.patient_id);
           return patientProfile && b.branch_id !== patientProfile.home_branch_id;
         }).length;
 
-        // 6. Calculate Weekly Patient Load (Mon - Sun)
         const weeklyLoad = [0, 0, 0, 0, 0, 0, 0];
         bookings.forEach(b => {
           if (b.booking_date) {
@@ -76,7 +69,6 @@ export default function AdminDashboard() {
         });
         const maxWeeklyLoad = Math.max(...weeklyLoad, 1);
 
-        // 7. Set Final State
         setData({
           totalActivePatients,
           networkUtilization,
@@ -148,7 +140,7 @@ export default function AdminDashboard() {
         {/* High-Level KPIs */}
         <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-6'>
           <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
-            <div className='h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl'>👥</div>
+            <div className='h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl'><FiUsers /></div>
             <div>
               <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>Total Patients</p>
               <p className='text-3xl font-black text-slate-800'>{data.totalActivePatients}</p>
@@ -156,7 +148,7 @@ export default function AdminDashboard() {
           </div>
           
           <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
-            <div className='h-14 w-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl'>⚙️</div>
+            <div className='h-14 w-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl'><FiSettings /></div>
             <div>
               <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>Network Machines</p>
               <p className='text-3xl font-black text-slate-800'>{data.totalNetworkMachines}</p>
@@ -164,7 +156,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
-            <div className='h-14 w-14 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl'>📊</div>
+            <div className='h-14 w-14 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl'><FiBarChart2 /></div>
             <div>
               <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>System Utilization</p>
               <p className='text-3xl font-black text-slate-800'>{data.networkUtilization}%</p>
@@ -196,12 +188,11 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* NEW: True Relative Bar Chart for Popular Session Times */}
+          {/* True Relative Bar Chart for Popular Session Times */}
           <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
             <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Popular Session Times</h2>
             <div className='flex items-end gap-4 h-32 mt-auto border-b border-slate-100 pb-2'>
               
-              {/* Morning Bar */}
               <div className='flex-1 flex flex-col justify-end group relative h-full'>
                 {data.sessionTimes.morning > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.morning}</span>}
                 <div 
@@ -210,7 +201,6 @@ export default function AdminDashboard() {
                 ></div>
               </div>
 
-              {/* Afternoon Bar */}
               <div className='flex-1 flex flex-col justify-end group relative h-full'>
                 {data.sessionTimes.afternoon > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.afternoon}</span>}
                 <div 
@@ -219,7 +209,6 @@ export default function AdminDashboard() {
                 ></div>
               </div>
 
-              {/* Evening Bar */}
               <div className='flex-1 flex flex-col justify-end group relative h-full'>
                 {data.sessionTimes.evening > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.evening}</span>}
                 <div 

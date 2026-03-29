@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useParams } from 'next/navigation';
-import { FiActivity } from 'react-icons/fi';
+import { FiInbox, FiFolder, FiBell, FiActivity } from 'react-icons/fi';
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -44,7 +44,6 @@ export default function NotificationsPage() {
       .update({ is_read: true })
       .eq('id', id);
     
-    // Refresh local state
     setNotifications(prev => 
       prev.map(n => n.id === id ? { ...n, is_read: true } : n)
     );
@@ -62,6 +61,12 @@ export default function NotificationsPage() {
   const handleMarkAllRead = async () => {
     setIsProcessing(true);
     const { data: sessionData } = await supabase.auth.getSession();
+    
+    if (!sessionData.session) {
+      setIsProcessing(false);
+      return;
+    }
+
     const { data: userData } = await supabase
       .from('users')
       .select('user_id')
@@ -112,8 +117,8 @@ export default function NotificationsPage() {
 
         <div className='space-y-4'>
           {notifications.length === 0 ? (
-            <div className='bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-sm'>
-              <div className='text-4xl mb-4'>📩</div>
+            <div className='bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-sm flex flex-col items-center justify-center'>
+              <FiInbox className='text-5xl mb-4 text-slate-400 opacity-50' />
               <p className='text-slate-500 font-medium'>You're all caught up! No new notifications.</p>
             </div>
           ) : (
@@ -123,14 +128,13 @@ export default function NotificationsPage() {
                 className={`relative bg-white border rounded-2xl p-6 shadow-sm transition-all flex items-start gap-5 
                   ${notif.is_read ? 'opacity-75 border-slate-200' : 'border-blue-200 ring-1 ring-blue-50 shadow-md'}`}
               >
-                {/* Status Dot */}
                 {!notif.is_read && (
                   <div className='absolute top-6 left-2 w-2 h-2 bg-blue-500 rounded-full'></div>
                 )}
 
                 <div className={`h-12 w-12 rounded-xl flex items-center justify-center text-xl shrink-0 
                   ${notif.is_read ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-600'}`}>
-                  {notif.is_read ? '📁' : '🔔'}
+                  {notif.is_read ? <FiFolder /> : <FiBell />}
                 </div>
 
                 <div className='flex-1'>
