@@ -137,7 +137,6 @@ export default function AdminDashboard() {
           <p className='text-slate-500 mt-1 font-medium'>Real-time aggregated data and operational health</p>
         </div>
 
-        {/* High-Level KPIs */}
         <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-6'>
           <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
             <div className='h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl'><FiUsers /></div>
@@ -164,10 +163,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Analytics Grid */}
         <div className='grid grid-cols-1 md:grid-cols-2 gap-6 mb-8'>
-          
-          {/* Branch Occupancy */}
           <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm'>
             <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Live Branch Occupancy</h2>
             <div className='space-y-5'>
@@ -188,7 +184,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* True Relative Bar Chart for Popular Session Times */}
           <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
             <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Popular Session Times</h2>
             <div className='flex items-end gap-4 h-32 mt-auto border-b border-slate-100 pb-2'>
@@ -226,7 +221,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Cross-Branch Guest Tracker */}
           <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm'>
             <h2 className='text-sm font-bold text-slate-800 mb-2 uppercase tracking-wider'>Cross-Branch Mobility</h2>
             <p className='text-xs text-slate-500 mb-6'>Patients currently booked outside their home branch.</p>
@@ -238,7 +232,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Dynamic Weekly Patient Load */}
           <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
             <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Weekly System Load</h2>
             <div className='flex items-end gap-2 h-32 mt-auto border-b border-slate-100 pb-2'>

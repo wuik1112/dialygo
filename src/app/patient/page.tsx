@@ -6,7 +6,7 @@ import PatientBottomNav from '../../components/PatientBottomNav';
 
 import { 
   FiMapPin, FiCalendar, FiClock, FiChevronLeft, FiChevronRight,
-  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiRefreshCw
+  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiXCircle, FiRefreshCw
 } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {

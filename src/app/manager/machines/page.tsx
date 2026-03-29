@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { 
   FiSearch, FiFilter, FiDatabase, FiUsers, FiLock, 
   FiSettings, FiInbox, FiImage, FiShield, FiAlertTriangle, 
-  FiEye, FiDroplet, FiCamera, FiCheckCircle, FiZoomIn, FiX, FiActivity, FiMapPin, FiTrash2, FiLoader
+  FiEye, FiDroplet, FiCamera, FiCheckCircle, FiZoomIn, FiX, FiActivity, FiMapPin, FiUser
 } from 'react-icons/fi';
 
 const formatDateDisplay = (dateStr: string | null) => {
@@ -43,7 +43,7 @@ export default function ManagerMachineStatus() {
     serial_number: '', asset_tag: '', manufacturer: '', model: '', software_version: '',
     status: 'Active', operating_hours: '0', commission_date: '', warranty_expiry: '',
     vendor_name: '', vendor_contact: '', last_calibration_date: '', last_maintenance_date: '', 
-    next_maintenance_date: '', photo_url: '', dedicated_patient_id: '',
+    next_maintenance_date: '', photo_url: '', 
     supports_hdf: false, has_bvm: false, has_endotoxin_filter: false, reason: '' 
   });
   
@@ -90,8 +90,8 @@ export default function ManagerMachineStatus() {
         supabase.from('branches').select('*').eq('id', branchId).single(),
         supabase.from('machines').select('*').eq('branch_id', branchId).order('id', { ascending: true }),
         supabase.from('patients').select(`
-          patient_id, hepatitis_b_status, hepatitis_c_status, hiv_status, 
-          vascular_access_type, vascular_access_location, mobility_status, requires_line_of_sight,
+          patient_id, assigned_machine_id, schedule_pattern, preferred_shift,
+          hepatitis_b_status, hepatitis_c_status, hiv_status, 
           users!inner(user_fullname)
         `).eq('home_branch_id', branchId)
       ]);
@@ -164,7 +164,7 @@ export default function ManagerMachineStatus() {
       serial_number: '', asset_tag: '', manufacturer: '', model: '', software_version: '',
       status: 'Active', operating_hours: '0', commission_date: new Date().toISOString().split('T')[0], warranty_expiry: '',
       vendor_name: '', vendor_contact: '', last_calibration_date: '', last_maintenance_date: '', next_maintenance_date: '', 
-      photo_url: '', dedicated_patient_id: '', supports_hdf: false, has_bvm: false, has_endotoxin_filter: false, reason: '' 
+      photo_url: '', supports_hdf: false, has_bvm: false, has_endotoxin_filter: false, reason: '' 
     });
     setModalMode('add');
     setMessage({ type: '', text: '' });
@@ -180,7 +180,6 @@ export default function ManagerMachineStatus() {
       vendor_name: machine.vendor_name || '', vendor_contact: machine.vendor_contact || '',
       last_calibration_date: machine.last_calibration_date || '', last_maintenance_date: machine.last_maintenance_date || '', 
       next_maintenance_date: machine.next_maintenance_date || '', photo_url: machine.photo_url || '', 
-      dedicated_patient_id: machine.dedicated_patient_id?.toString() || '',
       supports_hdf: machine.supports_hdf || false, has_bvm: machine.has_bvm || false, has_endotoxin_filter: machine.has_endotoxin_filter || false, reason: ''
     });
     setModalMode('edit');
@@ -217,7 +216,7 @@ export default function ManagerMachineStatus() {
         commission_date: formData.commission_date || null, warranty_expiry: formData.warranty_expiry || null,
         vendor_name: formData.vendor_name.trim() || null, vendor_contact: formData.vendor_contact.trim() || null,
         last_calibration_date: formData.last_calibration_date || null, last_maintenance_date: finalLastMaint, next_maintenance_date: finalNextMaint,
-        photo_url: formData.photo_url.trim() || null, dedicated_patient_id: formData.dedicated_patient_id ? parseInt(formData.dedicated_patient_id) : null,
+        photo_url: formData.photo_url.trim() || null,
         supports_hdf: formData.supports_hdf, has_bvm: formData.has_bvm, has_endotoxin_filter: formData.has_endotoxin_filter
       };
 
@@ -265,8 +264,10 @@ export default function ManagerMachineStatus() {
   }
 
   const totalMachines = machines.length;
-  const visitorPoolCount = machines.filter(m => !m.dedicated_patient_id).length;
-  const dedicatedPoolCount = machines.filter(m => m.dedicated_patient_id).length;
+  const visitorPoolCount = machines.filter(m => {
+    return patients.filter(p => p.assigned_machine_id === m.id).length === 0;
+  }).length;
+  const dedicatedPoolCount = totalMachines - visitorPoolCount;
   const maintenanceCount = machines.filter(m => m.status === 'Under Maintenance').length;
 
   const getPatientDetails = (id: number) => patients.find(p => p.patient_id === id);
@@ -290,9 +291,11 @@ export default function ManagerMachineStatus() {
       (m.model?.toLowerCase() || '').includes(term);
     
     const matchesStatus = statusFilter === 'All' || m.status === statusFilter;
+    
+    const assignedPatients = patients.filter(p => p.assigned_machine_id === m.id);
     const matchesAllocation = allocationFilter === 'All' || 
-                              (allocationFilter === 'Dedicated' && m.dedicated_patient_id) || 
-                              (allocationFilter === 'Visitor' && !m.dedicated_patient_id);
+                              (allocationFilter === 'Dedicated' && assignedPatients.length > 0) || 
+                              (allocationFilter === 'Visitor' && assignedPatients.length === 0);
 
     const matchesCapability = capabilityFilter === 'All' ||
                               (capabilityFilter === 'HDF' && m.supports_hdf) ||
@@ -330,11 +333,11 @@ export default function ManagerMachineStatus() {
             <div className='h-10 w-10 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center text-lg'><FiDatabase /></div>
           </div>
           <div className='bg-white p-5 rounded-2xl border border-indigo-200 shadow-sm flex items-center justify-between ring-1 ring-indigo-50'>
-            <div><p className='text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1'>Visitor Pool</p><p className='text-2xl font-black text-indigo-700'>{visitorPoolCount}</p></div>
+            <div><p className='text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1'>Free Pool</p><p className='text-2xl font-black text-indigo-700'>{visitorPoolCount}</p></div>
             <div className='h-10 w-10 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center text-lg'><FiUsers /></div>
           </div>
           <div className='bg-white p-5 rounded-2xl border border-blue-200 shadow-sm flex items-center justify-between'>
-            <div><p className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Dedicated</p><p className='text-2xl font-black text-blue-700'>{dedicatedPoolCount}</p></div>
+            <div><p className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Allocated</p><p className='text-2xl font-black text-blue-700'>{dedicatedPoolCount}</p></div>
             <div className='h-10 w-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-lg'><FiLock /></div>
           </div>
           <div className='bg-white p-5 rounded-2xl border border-amber-200 shadow-sm flex items-center justify-between'>
@@ -375,10 +378,11 @@ export default function ManagerMachineStatus() {
               <option value="Faulty">Faulty</option>
             </select>
 
+            {/* FIX: Escaped the greater-than symbol to fix the JSX parsing error */}
             <select value={allocationFilter} onChange={e => setAllocationFilter(e.target.value)} className='flex-1 xl:w-48 p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-700 text-sm cursor-pointer'>
               <option value="All">All Allocations</option>
-              <option value="Visitor">Floating Pool</option>
-              <option value="Dedicated">Dedicated Patients</option>
+              <option value="Visitor">Floating Pool (0 Patients)</option>
+              <option value="Dedicated">Allocated (&gt;0 Patients)</option>
             </select>
 
             {hasActiveFilters && (
@@ -405,16 +409,17 @@ export default function ManagerMachineStatus() {
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             {filteredMachines.map(machine => {
               const health = getMaintenanceHealth(machine.next_maintenance_date);
-              const patient = machine.dedicated_patient_id ? getPatientDetails(machine.dedicated_patient_id) : null;
-              const isInfectious = patient && (patient.hepatitis_b_status === 'Positive' || patient.hepatitis_c_status === 'Positive' || patient.hiv_status === 'Positive');
+              
+              const assignedPatients = patients.filter(p => p.assigned_machine_id === machine.id);
+              const isInfectious = assignedPatients.some(p => p.hepatitis_b_status === 'Positive' || p.hepatitis_c_status === 'Positive' || p.hiv_status === 'Positive');
 
               return (
                 <div key={machine.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col transition-all ${isInfectious ? 'border-rose-300 ring-1 ring-rose-50' : 'border-slate-200 hover:border-blue-300 hover:shadow-md'}`}>
                   
                   <div className={`px-5 py-2.5 text-[11px] font-black uppercase tracking-widest flex justify-between items-center
-                    ${isInfectious ? 'bg-rose-600 text-white' : patient ? 'bg-blue-600 text-white' : 'bg-indigo-50 text-indigo-700 border-b border-indigo-100'}`}>
+                    ${isInfectious ? 'bg-rose-600 text-white' : assignedPatients.length > 0 ? 'bg-blue-600 text-white' : 'bg-indigo-50 text-indigo-700 border-b border-indigo-100'}`}>
                     <span className='flex items-center gap-1.5'>
-                      {patient ? <><FiLock /> Dedicated: {patient.users?.user_fullname}</> : <><FiUsers /> Floating Pool</>}
+                      {assignedPatients.length > 0 ? <><FiLock /> {assignedPatients.length}/6 Slots Filled</> : <><FiUsers /> Floating Pool (0/6)</>}
                     </span>
                     <span className={`px-2 py-0.5 rounded shadow-sm ${machine.status === 'Active' ? 'bg-emerald-400 text-white' : machine.status === 'Under Maintenance' ? 'bg-amber-400 text-white' : machine.status === 'Reserved' ? 'bg-blue-400 text-white' : 'bg-rose-400 text-white'}`}>{machine.status}</span>
                   </div>
@@ -449,22 +454,29 @@ export default function ManagerMachineStatus() {
                             <p className='text-2xl font-black text-slate-800 tracking-tight'>SN: {machine.serial_number}</p>
                             <p className='text-xs font-bold text-slate-500'>{machine.manufacturer} {machine.model} {machine.asset_tag && <span className='text-blue-500 ml-1'>[{machine.asset_tag}]</span>}</p>
                           </div>
-                          <button onClick={() => handleEditClick(machine)} className='text-xs font-bold text-slate-400 hover:text-blue-600 underline'>Edit Details</button>
+                          <button onClick={() => handleEditClick(machine)} className='text-xs font-bold text-slate-400 hover:text-blue-600 underline'>Edit</button>
                         </div>
                       </div>
 
-                      {patient && (
+                      {assignedPatients.length > 0 && (
                         <div className={`mt-3 p-3 rounded-lg border ${isInfectious ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
-                          <div className='flex flex-wrap gap-2'>
-                            {patient.hepatitis_b_status === 'Positive' && <span className='flex items-center gap-1 px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'><FiAlertTriangle /> HBV+</span>}
-                            {patient.hepatitis_c_status === 'Positive' && <span className='flex items-center gap-1 px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'><FiAlertTriangle /> HCV+</span>}
-                            {patient.hiv_status === 'Positive' && <span className='flex items-center gap-1 px-2 py-1 bg-rose-600 text-white text-[10px] font-bold rounded-md shadow-sm'><FiAlertTriangle /> HIV+</span>}
-                            {patient.requires_line_of_sight && <span className='flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold rounded-md'><FiEye /> Line of Sight</span>}
-                            {patient.vascular_access_type && (
-                              <span className='px-2 py-1 bg-white border border-slate-200 text-slate-600 text-[10px] font-bold rounded-md flex items-center gap-1'>
-                                <FiDroplet /> {patient.vascular_access_location || ''} {patient.vascular_access_type}
-                              </span>
-                            )}
+                          <p className='text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2'>Assigned Roster</p>
+                          <div className='flex flex-col gap-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1'>
+                            {assignedPatients.map(p => (
+                              <div key={p.patient_id} className='flex items-center justify-between bg-white px-2 py-1.5 rounded border border-slate-100 shadow-sm'>
+                                <div className='flex items-center gap-1.5 truncate'>
+                                  <FiUser className='text-blue-400 shrink-0 text-xs' />
+                                  <span className='text-xs font-bold text-slate-700 truncate'>{p.users?.user_fullname}</span>
+                                  
+                                  {(p.hepatitis_b_status === 'Positive' || p.hepatitis_c_status === 'Positive' || p.hiv_status === 'Positive') && (
+                                    <FiAlertTriangle className='text-rose-500 text-[10px] shrink-0' title="Infectious Status" />
+                                  )}
+                                </div>
+                                <span className='text-[9px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase shrink-0'>
+                                  {p.schedule_pattern} {p.preferred_shift ? p.preferred_shift.split(' (')[0].substring(0, 3) : ''}
+                                </span>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -534,7 +546,7 @@ export default function ManagerMachineStatus() {
                       )}
                       <div className='mt-2 px-1'>
                         <input type="file" accept="image/*" onChange={handlePhotoUpload} disabled={isUploadingPhoto} className='w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300 transition-all cursor-pointer' />
-                        {isUploadingPhoto && <p className='text-xs font-bold text-blue-600 flex items-center justify-center gap-1 mt-2'><FiLoader className='animate-spin' /> Uploading to secure storage...</p>}
+                        {isUploadingPhoto && <p className='text-xs font-bold text-blue-600 flex items-center justify-center gap-1 mt-2'><FiActivity className='animate-spin' /> Uploading to secure storage...</p>}
                       </div>
                     </div>
                   </div>
@@ -596,19 +608,9 @@ export default function ManagerMachineStatus() {
                 <div className='space-y-6'>
                   <div className='grid grid-cols-1 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200'>
                     <div>
-                      <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Patient Allocation</label>
-                      <select value={formData.dedicated_patient_id} onChange={e => { const newId = e.target.value; setFormData(prev => ({ ...prev, dedicated_patient_id: newId, status: newId ? (prev.status === 'Active' ? 'Reserved' : prev.status) : (prev.status === 'Reserved' ? 'Active' : prev.status) })); }} className='w-full p-3 bg-white border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800'>
-                        <option value="">Floating Pool (Available to Visitors)</option>
-                        <optgroup label="Dedicated To Patient:">
-                          {patients.map(p => <option key={p.patient_id} value={p.patient_id}>[Dedicated] {p.users?.user_fullname}</option>)}
-                        </optgroup>
-                      </select>
-                    </div>
-                    <div>
                       <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Operational Status</label>
                       <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className={`w-full p-3 border rounded-xl outline-none font-bold text-sm ${formData.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : formData.status === 'Under Maintenance' ? 'bg-amber-50 text-amber-700 border-amber-200' : formData.status === 'Reserved' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-                        {!formData.dedicated_patient_id && <option value="Active">Active & Ready</option>}
-                        {formData.dedicated_patient_id && <option value="Reserved">Reserved (Dedicated)</option>}
+                        <option value="Active">Active & Ready</option>
                         <option value="Under Maintenance">Under Maintenance</option>
                         <option value="Faulty">Faulty</option>
                       </select>
@@ -661,7 +663,7 @@ export default function ManagerMachineStatus() {
               </div>
 
               {message.text && (
-                <div className={`mt-6 p-4 rounded-xl font-bold text-sm border flex items-center gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                <div className={`mt-6 p-4 rounded-xl font-bold text-sm border flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
                   <span className='mt-0.5 text-lg'>{message.type === 'success' ? <FiCheckCircle /> : <FiAlertTriangle />}</span>
                   <span>{message.text}</span>
                 </div>

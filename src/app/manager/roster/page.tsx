@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
-import { FiActivity, FiCheckCircle, FiXCircle } from 'react-icons/fi';
+import { FiActivity } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
   const year = d.getFullYear();
@@ -294,6 +294,7 @@ export default function ManagerWeeklyRoster() {
   const prevMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() - 1); setCurrentMonth(d); };
   const nextMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() + 1); setCurrentMonth(d); };
 
+  // TypeScript fix implemented here
   const getMonthDays = () => {
     const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
@@ -302,8 +303,9 @@ export default function ManagerWeeklyRoster() {
     let startDay = start.getDay();
     startDay = startDay === 0 ? 6 : startDay - 1; 
     for (let i = startDay; i > 0; i--) {
-      const d = new Date(start); d.setDate(d.getDate() - i);
-      days.push({ date: d, isCurrentMonth: false });
+      const prevDate = new Date(start); 
+      prevDate.setDate(prevDate.getDate() - i);
+      days.push({ date: prevDate, isCurrentMonth: false });
     }
     
     for (let i = 1; i <= end.getDate(); i++) {
@@ -311,8 +313,10 @@ export default function ManagerWeeklyRoster() {
     }
     
     while (days.length % 7 !== 0) {
-      const d = new Date(days[days.length - 1].date); d.setDate(d.getDate() + 1);
-      days.push({ date: d, isCurrentMonth: false });
+      const lastDate = days[days.length - 1].date;
+      const nextDate = new Date(lastDate); 
+      nextDate.setDate(nextDate.getDate() + 1);
+      days.push({ date: nextDate, isCurrentMonth: false });
     }
     return days;
   };
@@ -322,16 +326,7 @@ export default function ManagerWeeklyRoster() {
     setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
   };
 
-  if (isLoading && !branchData) {
-    return (
-      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
-        <div className='flex flex-col items-center text-blue-600 font-bold'>
-          <FiActivity className='text-4xl mb-4 animate-spin' />
-          <span>Loading Duty Roster Engine...</span>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading && !branchData) return <div className='p-8 text-center text-slate-500 mt-20'>Loading Duty Roster Engine...</div>;
 
   const getShiftStyles = (type: string) => {
     switch(type) {
@@ -581,7 +576,7 @@ export default function ManagerWeeklyRoster() {
 
               {message.text && (
                 <div className={`p-4 rounded-xl font-bold text-sm border flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                  <span className='mt-0.5 text-lg'>{message.type === 'success' ? <FiCheckCircle /> : <FiXCircle />}</span>
+                  <span className='mt-0.5'>{message.type === 'success' ? '✅' : '❌'}</span>
                   <span>{message.text}</span>
                 </div>
               )}

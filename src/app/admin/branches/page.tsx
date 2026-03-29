@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useLoadScript, Autocomplete, GoogleMap, Marker } from '@react-google-maps/api';
-import { FiActivity, FiMapPin, FiHome, FiZoomIn, FiTrash2, FiLoader } from 'react-icons/fi';
+import { FiActivity, FiMapPin } from 'react-icons/fi';
 
 const libraries: any = ['places'];
 
@@ -275,8 +275,6 @@ export default function BranchManagement() {
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
           {filteredBranches.map(branch => {
             const isActive = branch.status === 'Active';
-            const assignedManager = managers.find(m => m.user_id === branch.manager_id);
-
             return (
               <div key={branch.id} className={`bg-white p-6 rounded-2xl border ${isActive ? 'border-slate-200' : 'border-red-100 bg-red-50/20'} shadow-sm flex flex-col hover:shadow-md transition-shadow`}>
                 <div className='flex justify-between items-start mb-4'>
