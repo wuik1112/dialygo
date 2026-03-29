@@ -1,0 +1,8 @@
+{
+  "name": "DialyGo",
+  "short_name": "DialyGo",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#f8fafc",
+  "theme_color": "#ffffff"
+}
