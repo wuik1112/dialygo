@@ -4,12 +4,21 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 
-// Import professional vector icons
+// Import professional vector icons and the IconType definition
 import { 
   FiBell, FiPieChart, FiMap, FiUsers, FiTool, 
   FiTrendingUp, FiCalendar, FiClock, FiMonitor, 
   FiFolder, FiFileText, FiActivity, FiHome
 } from 'react-icons/fi';
+import { IconType } from 'react-icons';
+
+// 1. Define the exact shape of our links so TypeScript knows 'badge' is optional
+interface SidebarLink {
+  title: string;
+  url: string;
+  icon: IconType;
+  badge?: number | null;
+}
 
 export default function Sidebar() {
   const [role, setRole] = useState('');
@@ -66,12 +75,13 @@ export default function Sidebar() {
   if (!isMounted || !role) return <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 min-h-screen flex flex-col'></aside>;
   if (role === 'Patient') return null;
 
-  const sharedLinks = [
+  // 2. Explicitly type the shared links array
+  const sharedLinks: SidebarLink[] = [
     { title: 'Notifications', url: `/${role.toLowerCase()}/notifications`, icon: FiBell, badge: unreadCount > 0 ? unreadCount : null }
   ];
 
-  // Map the professional icons to the menu items
-  const menuConfig = {
+  // 3. Explicitly type the configuration dictionary
+  const menuConfig: Record<string, SidebarLink[]> = {
     Admin: [
       { title: 'Network Dashboard', url: '/admin', icon: FiPieChart },
       { title: 'Branch Management', url: '/admin/branches', icon: FiMap },
@@ -96,7 +106,7 @@ export default function Sidebar() {
     ]
   };
 
-  const roleLinks = menuConfig[role as keyof typeof menuConfig] || [];
+  const roleLinks = menuConfig[role] || [];
   const currentLinks = [...roleLinks, ...sharedLinks];
 
   const handleLogout = async () => {
@@ -130,7 +140,6 @@ export default function Sidebar() {
               }`}
             >
               <div className='flex items-center gap-3'>
-                {/* Dynamically render the React Icon component */}
                 <link.icon className={`text-lg ${isActive ? 'text-blue-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
                 <span className='text-sm'>{link.title}</span>
               </div>
