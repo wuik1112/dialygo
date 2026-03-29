@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
-import { FiActivity } from 'react-icons/fi';
+import { FiActivity, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
   const year = d.getFullYear();
@@ -294,11 +294,11 @@ export default function ManagerWeeklyRoster() {
   const prevMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() - 1); setCurrentMonth(d); };
   const nextMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() + 1); setCurrentMonth(d); };
 
-  // TypeScript fix implemented here
+  // FIX: Properly typed days array for TypeScript
   const getMonthDays = () => {
     const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
-    const days = [];
+    const days: { date: Date, isCurrentMonth: boolean }[] = [];
     
     let startDay = start.getDay();
     startDay = startDay === 0 ? 6 : startDay - 1; 
@@ -313,8 +313,8 @@ export default function ManagerWeeklyRoster() {
     }
     
     while (days.length % 7 !== 0) {
-      const lastDate = days[days.length - 1].date;
-      const nextDate = new Date(lastDate); 
+      const lastDate: Date = days[days.length - 1].date;
+      const nextDate: Date = new Date(lastDate); 
       nextDate.setDate(nextDate.getDate() + 1);
       days.push({ date: nextDate, isCurrentMonth: false });
     }
@@ -526,6 +526,7 @@ export default function ManagerWeeklyRoster() {
                 </div>
               )}
 
+              {/* NEW CLINICAL BLOCK */}
               {formData.shift_type === 'WORK' && (
                 <div className='p-5 bg-blue-50/50 border border-blue-100 rounded-xl space-y-4 animate-in slide-in-from-top-2'>
                   <div className='grid grid-cols-2 gap-4'>
@@ -576,7 +577,7 @@ export default function ManagerWeeklyRoster() {
 
               {message.text && (
                 <div className={`p-4 rounded-xl font-bold text-sm border flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                  <span className='mt-0.5'>{message.type === 'success' ? '✅' : '❌'}</span>
+                  <span className='mt-0.5'>{message.type === 'success' ? <FiCheckCircle /> : <FiXCircle />}</span>
                   <span>{message.text}</span>
                 </div>
               )}
