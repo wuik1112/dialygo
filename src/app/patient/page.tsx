@@ -6,7 +6,7 @@ import PatientBottomNav from '../../components/PatientBottomNav';
 
 import { 
   FiMapPin, FiCalendar, FiClock, FiChevronLeft, FiChevronRight,
-  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiXCircle, FiRefreshCw
+  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiRefreshCw
 } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
@@ -52,7 +52,6 @@ export default function PatientHome() {
       const { data: patient } = await supabase.from('patients').select('*, branches(branch_name, branch_address)').eq('user_id', user.user_id).single();
       setPatientData({ ...user, ...patient });
 
-      // Fetch all actual bookings
       const { data: bookingData } = await supabase
         .from('bookings')
         .select('*, branches(branch_name, branch_address)')
@@ -70,19 +69,12 @@ export default function PatientHome() {
     loadDashboard();
   }, [router]);
 
-  // ============================================================================
-  // DYNAMIC SCHEDULE CALCULATOR
-  // ============================================================================
   const activeBookings = useMemo(() => {
     if (!patientData) return [];
     
-    // Physical Bookings for the current tab
     const physicalBookings = dbBookings.filter(b => b.booking_type === activeTab);
-    
-    // If we are looking at 'Travel', there are no virtual bookings
     if (activeTab === 'Travel') return physicalBookings.filter(b => !['Moved', 'Cancelled', 'Cancellation Rejected', 'Reschedule Rejected'].includes(b.booking_status));
 
-    // For 'Home', generate Virtual Bookings for the whole current month
     const virtualBookings: any[] = [];
     const overriddenDates = new Set(physicalBookings.map(b => b.booking_date));
 
@@ -112,7 +104,6 @@ export default function PatientHome() {
       }
     }
 
-    // Merge Virtuals with Physical (excluding ghost records from active views)
     const activePhysical = physicalBookings.filter(b => !['Moved', 'Cancelled', 'Cancellation Rejected', 'Reschedule Rejected'].includes(b.booking_status));
     return [...activePhysical, ...virtualBookings];
   }, [dbBookings, patientData, activeTab, currentMonth]);
@@ -157,9 +148,6 @@ export default function PatientHome() {
     return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' }; 
   };
 
-  // ============================================================================
-  // GHOST RECORD ACTION HANDLERS
-  // ============================================================================
   const handleConfirmCancel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cancelDialogTarget || !cancelReason.trim()) return;
@@ -167,7 +155,6 @@ export default function PatientHome() {
     try {
       let bookingIdToUse = cancelDialogTarget.id;
 
-      // If they are cancelling a Virtual Session, inject it into the DB first
       if (typeof cancelDialogTarget.id === 'string' && cancelDialogTarget.id.startsWith('virtual-')) {
         const { data: newBooking, error: insertErr } = await supabase.from('bookings').insert([{
           patient_id: patientData.patient_id,
@@ -187,7 +174,7 @@ export default function PatientHome() {
       await supabase.from('requests').insert([{ request_type: 'Cancel', booking_id: bookingIdToUse, request_reason: cancelReason, request_status: 'PENDING' }]);
       
       setCancelDialogTarget(null); setDetailViewTarget(null); setCancelReason('');
-      loadDashboard(); // Refresh to lock the view
+      loadDashboard(); 
     } catch (error) { alert("Failed to cancel booking."); } finally { setIsProcessing(false); }
   };
 
@@ -198,7 +185,6 @@ export default function PatientHome() {
     try {
       let bookingIdToUse = rescheduleTarget.id;
 
-      // If they are rescheduling a Virtual Session, inject it into the DB first to block routine generation
       if (typeof rescheduleTarget.id === 'string' && rescheduleTarget.id.startsWith('virtual-')) {
         const { data: newBooking, error: insertErr } = await supabase.from('bookings').insert([{
           patient_id: patientData.patient_id,
@@ -239,7 +225,7 @@ export default function PatientHome() {
 
   if (isLoading) {
     return (
-      <div className='max-w-md mx-auto bg-slate-50 h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
+      <div className='max-w-md mx-auto w-full bg-slate-50 h-screen h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
         <div className='bg-white px-5 pt-12 pb-4 shadow-sm z-10 shrink-0'><h1 className='text-center text-xl font-black text-slate-800 tracking-tight mb-4'>Loading...</h1></div>
         <div className='flex-1 flex items-center justify-center text-blue-600 font-bold'><span className='animate-pulse'>Fetching clinical records...</span></div>
         <PatientBottomNav />
@@ -309,7 +295,7 @@ export default function PatientHome() {
   };
 
   return (
-    <div className='max-w-md mx-auto bg-slate-50 h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
+    <div className='max-w-md mx-auto w-full bg-slate-50 h-screen h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
       
       {!detailViewTarget && !rescheduleTarget && (
         <>
@@ -397,9 +383,7 @@ export default function PatientHome() {
         </>
       )}
 
-      {/* ========================================= */}
       {/* STATUS TRACKING VIEW */}
-      {/* ========================================= */}
       {detailViewTarget && !rescheduleTarget && (
         <div className='flex flex-col h-full w-full bg-slate-50 animate-in slide-in-from-right-8 duration-300 z-20 absolute inset-0'>
           <div className='bg-white px-5 pt-12 pb-4 shadow-sm flex items-center justify-between shrink-0'>
@@ -483,9 +467,7 @@ export default function PatientHome() {
         </div>
       )}
 
-      {/* ========================================= */}
       {/* RESCHEDULE VIEW */}
-      {/* ========================================= */}
       {rescheduleTarget && (
         <div className='flex flex-col h-full w-full bg-slate-50 animate-in slide-in-from-bottom-full duration-300 z-30 absolute inset-0'>
           <div className='bg-white px-5 pt-12 pb-4 shadow-sm flex items-center justify-between shrink-0'>
@@ -511,7 +493,7 @@ export default function PatientHome() {
               </div>
 
               <div>
-                <label className='block text-xs font-black text-slate-500 uppercase tracking-widest mb-3 flex justify-between'>
+                <label className='block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 flex justify-between'>
                   <span>Select Shift</span>{newDate && <span className='text-blue-500 text-[10px] animate-pulse'>Checking availability...</span>}
                 </label>
                 <div className='grid grid-cols-2 gap-3'>
@@ -535,9 +517,7 @@ export default function PatientHome() {
         </div>
       )}
 
-      {/* ========================================= */}
       {/* CANCEL CONFIRMATION DIALOG */}
-      {/* ========================================= */}
       {cancelDialogTarget && (
         <div className='absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-5 animate-in fade-in'>
           <form onSubmit={handleConfirmCancel} className='bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95'>
