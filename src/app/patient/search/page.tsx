@@ -72,6 +72,7 @@ export default function PatientSearchBooking() {
 
   const [morningSlots, setMorningSlots] = useState(0);
   const [afternoonSlots, setAfternoonSlots] = useState(0);
+  const [eveningSlots, setEveningSlots] = useState(0);
   const [isCheckingSlots, setIsCheckingSlots] = useState(false);
 
   const regions = ['Penang', 'Kuala Lumpur', 'Johor', 'Melaka'];
@@ -281,15 +282,19 @@ export default function PatientSearchBooking() {
 
         const morningCount = existingBookings.filter(b => b.booking_session_time?.includes('Morning')).length;
         const afternoonCount = existingBookings.filter(b => b.booking_session_time?.includes('Afternoon')).length;
+        const eveningCount = existingBookings.filter(b => b.booking_session_time?.includes('Evening')).length;
 
         const remMorning = Math.max(0, maxCapacity - morningCount);
         const remAfternoon = Math.max(0, maxCapacity - afternoonCount);
+        const remEvening = Math.max(0, maxCapacity - eveningCount);
 
         setMorningSlots(remMorning);
         setAfternoonSlots(remAfternoon);
+        setEveningSlots(remEvening);
 
         if (draftShift.includes('Morning') && remMorning === 0) setDraftShift('');
         if (draftShift.includes('Afternoon') && remAfternoon === 0) setDraftShift('');
+        if (draftShift.includes('Evening') && remEvening === 0) setDraftShift('');
       } catch (err) {
         console.error("Error checking slots:", err);
       } finally {
@@ -350,7 +355,7 @@ export default function PatientSearchBooking() {
       const maxCapacity = selectedBranch.available_slots > 0 ? selectedBranch.available_slots : selectedBranch.total_machines || 8;
 
       for (const session of selectedSessions) {
-        const shiftKeyword = session.shift.includes('Morning') ? 'Morning' : 'Afternoon';
+        const shiftKeyword = session.shift.includes('Morning') ? 'Morning' : session.shift.includes('Afternoon') ? 'Afternoon' : 'Evening';
         const { data: existingBookings, error: checkError } = await supabase
           .from('bookings')
           .select('id')
@@ -735,6 +740,7 @@ export default function PatientSearchBooking() {
               </div>
 
               <div className='space-y-3 mb-5 relative'>
+                {/* MORNING SHIFT */}
                 <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Morning') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
                   <div>
                     <p className={`font-bold ${!isEligibleForSelectedDate || morningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Morning Shift</p>
@@ -746,6 +752,7 @@ export default function PatientSearchBooking() {
                   </button>
                 </div>
 
+                {/* AFTERNOON SHIFT */}
                 <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Afternoon') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
                   <div>
                     <p className={`font-bold ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Afternoon Shift</p>
@@ -754,6 +761,18 @@ export default function PatientSearchBooking() {
                   </div>
                   <button type="button" disabled={!isEligibleForSelectedDate || afternoonSlots === 0} onClick={() => setDraftShift('Afternoon (12:00 - 16:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Afternoon') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                     {draftShift.includes('Afternoon') ? 'Selected' : 'Select'}
+                  </button>
+                </div>
+
+                {/* EVENING SHIFT */}
+                <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Evening') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
+                  <div>
+                    <p className={`font-bold ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Evening Shift</p>
+                    <p className='text-xs text-slate-500 flex items-center gap-1'><FiClock /> 5:00pm - 9:00pm</p>
+                    <p className={`text-xs font-bold mt-1 ${eveningSlots > 0 && isEligibleForSelectedDate ? 'text-purple-600' : 'text-red-500'}`}>{eveningSlots > 0 ? `${eveningSlots < 10 ? '0'+eveningSlots : eveningSlots} Slots Available` : 'Full (No Slots)'}</p>
+                  </div>
+                  <button type="button" disabled={!isEligibleForSelectedDate || eveningSlots === 0} onClick={() => setDraftShift('Evening (17:00 - 21:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Evening') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    {draftShift.includes('Evening') ? 'Selected' : 'Select'}
                   </button>
                 </div>
               </div>

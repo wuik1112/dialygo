@@ -81,21 +81,26 @@ export default function ManagerBookings() {
         return;
       }
 
+      let reqData = null;
       if (selectedBooking.booking_status?.includes('Cancel') || selectedBooking.booking_status?.includes('Reschedule')) {
         const { data } = await supabase.from('requests').select('*').eq('booking_id', selectedBooking.id).order('created_at', { ascending: false }).limit(1).single();
+        reqData = data;
         setRequestDetails(data);
       } else {
         setRequestDetails(null);
       }
 
-      // Fetch FREE Machines for the SPECIFIC Date and Shift
+      // Fetch FREE Machines for the SPECIFIC Date and Shift (Using Requested Reschedule Date if Applicable)
       if (managerBranchId && !selectedBooking.booking_status?.includes('Cancel')) {
+        const targetDate = reqData?.request_new_date || selectedBooking.booking_date;
+        const targetSession = reqData?.request_new_session || selectedBooking.booking_session_time;
+        
         const { data: bookedSlots } = await supabase
           .from('bookings')
           .select('machine_id')
           .eq('branch_id', managerBranchId)
-          .eq('booking_date', selectedBooking.booking_date)
-          .eq('booking_session_time', selectedBooking.booking_session_time)
+          .eq('booking_date', targetDate)
+          .eq('booking_session_time', targetSession)
           .in('booking_status', ['Confirmed', 'Rescheduled', 'Completed']);
         
         const bookedMachineIds = bookedSlots?.map(b => b.machine_id).filter(Boolean) || [];
@@ -136,14 +141,14 @@ export default function ManagerBookings() {
       if (actionCategory === 'Approve') {
         if (currentStatus === 'Pending Cancellation') {
           finalStatus = 'Cancelled'; 
-          await supabase.from('requests').update({ request_status: 'APPROVED' }).eq('booking_id', bookingId).eq('request_status', 'PENDING');
+          await supabase.from('requests').update({ request_status: 'APPROVED', manager_id: managerBranchId }).eq('booking_id', bookingId).eq('request_status', 'PENDING');
         } else if (currentStatus === 'Pending Reschedule' || currentStatus?.includes('Reschedule')) {
           const { data: reqData } = await supabase.from('requests').select('*').eq('booking_id', bookingId).eq('request_type', 'Reschedule').eq('request_status', 'PENDING').single();
           if (reqData) {
             finalStatus = 'Rescheduled'; 
             newDate = reqData.request_new_date;
             newSession = reqData.request_new_session;
-            await supabase.from('requests').update({ request_status: 'APPROVED' }).eq('id', reqData.id);
+            await supabase.from('requests').update({ request_status: 'APPROVED', manager_id: managerBranchId }).eq('id', reqData.id);
           } else { finalStatus = 'Rescheduled'; }
         } else {
           finalStatus = 'Confirmed'; 
@@ -175,7 +180,7 @@ export default function ManagerBookings() {
         let msg = '';
         if (actionCategory === 'Approve') {
           if (currentStatus === 'Pending Cancellation') {
-            msg = 'Your cancellation request has been approved. The session has been removed from your schedule.';
+            msg = 'Your cancellation request has been approved. The session has been removed from your active schedule.';
           } else {
             const bDate = newDate ? new Date(newDate) : new Date(selectedBooking.booking_date);
             const shiftTime = newSession || selectedBooking.booking_session_time;
@@ -424,6 +429,15 @@ export default function ManagerBookings() {
             </div>
 
             <div className='flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50'>
+              {/* Highlight New Proposed Reschedule Date/Time to Manager */}
+              {requestDetails?.request_type === 'Reschedule' && (
+                <div className='bg-purple-50 p-4 rounded-2xl border border-purple-200 shadow-sm'>
+                  <h3 className='text-[10px] font-black text-purple-600 uppercase tracking-widest mb-2'>Requested Reschedule</h3>
+                  <p className='text-lg font-black text-slate-800'>{new Date(requestDetails.request_new_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  <p className='text-sm font-bold text-slate-600 mt-1'><FiClock className="inline text-purple-500 mr-1"/> {requestDetails.request_new_session}</p>
+                </div>
+              )}
+
               <div className='bg-white p-4 rounded-2xl border border-slate-100 shadow-sm'>
                 <h3 className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3'>Patient Profile</h3>
                 <p className='text-lg font-black text-slate-800'>{selectedBooking.patients?.users?.user_fullname}</p>

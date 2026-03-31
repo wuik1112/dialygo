@@ -88,8 +88,9 @@ export default function ManagerSettings() {
           current_password: '', new_password: '', confirm_password: '',
           branch_contact: branchData?.branch_contact || '',
           branch_address: branchData?.branch_address || '',
-          gallery_photos: branchData?.gallery_photos || [],
-          amenities: branchData?.amenities || []
+          // FIX 1: Deduplicate arrays immediately upon loading from the database
+          gallery_photos: Array.from(new Set(branchData?.gallery_photos || [])),
+          amenities: Array.from(new Set(branchData?.amenities || []))
         });
 
         setReadOnlyData({
@@ -148,7 +149,9 @@ export default function ManagerSettings() {
       const newAmenities = isSelected 
         ? prev.amenities.filter(a => a !== amenity)
         : [...prev.amenities, amenity];
-      return { ...prev, amenities: newAmenities };
+        
+      // FIX 2: Deduplicate the array in state every time a checkbox is clicked
+      return { ...prev, amenities: Array.from(new Set(newAmenities)) };
     });
   };
 
@@ -210,7 +213,7 @@ export default function ManagerSettings() {
         newUrls.push(data.publicUrl);
       }
 
-      setFormData(prev => ({ ...prev, gallery_photos: [...prev.gallery_photos, ...newUrls] }));
+      setFormData(prev => ({ ...prev, gallery_photos: Array.from(new Set([...prev.gallery_photos, ...newUrls])) }));
 
     } catch (error: any) {
       alert(`Upload failed: ${error.message}`);
@@ -295,8 +298,9 @@ export default function ManagerSettings() {
           .update({
             branch_contact: formData.branch_contact.trim(),
             branch_operating_hours: compiledHours,
-            amenities: formData.amenities,
-            gallery_photos: formData.gallery_photos
+            // FIX 3: Ensure the final payload to the database is strictly deduplicated
+            amenities: Array.from(new Set(formData.amenities)),
+            gallery_photos: Array.from(new Set(formData.gallery_photos))
           })
           .eq('id', readOnlyData.branch_id);
 

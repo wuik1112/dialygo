@@ -73,7 +73,9 @@ export default function PatientHome() {
     if (!patientData) return [];
     
     const physicalBookings = dbBookings.filter(b => b.booking_type === activeTab);
-    if (activeTab === 'Travel') return physicalBookings.filter(b => !['Moved', 'Cancelled', 'Cancellation Rejected', 'Reschedule Rejected'].includes(b.booking_status));
+    
+    // We retain 'Cancelled' bookings so the patient can see they have been successfully cancelled.
+    if (activeTab === 'Travel') return physicalBookings.filter(b => !['Moved'].includes(b.booking_status));
 
     const virtualBookings: any[] = [];
     const overriddenDates = new Set(physicalBookings.map(b => b.booking_date));
@@ -104,7 +106,7 @@ export default function PatientHome() {
       }
     }
 
-    const activePhysical = physicalBookings.filter(b => !['Moved', 'Cancelled', 'Cancellation Rejected', 'Reschedule Rejected'].includes(b.booking_status));
+    const activePhysical = physicalBookings.filter(b => !['Moved'].includes(b.booking_status));
     return [...activePhysical, ...virtualBookings];
   }, [dbBookings, patientData, activeTab, currentMonth]);
 
@@ -214,13 +216,38 @@ export default function PatientHome() {
     isLateCancel = (targetDate.getTime() - new Date().getTime()) < (24 * 60 * 60 * 1000); 
   }
 
+  // --- NEW MEDICAL REALITY RESCHEDULE LOGIC ---
   let minRescheduleDate = '', maxRescheduleDate = '';
+  
   if (rescheduleTarget) {
     const origDate = new Date(rescheduleTarget.booking_date);
-    const minD = new Date(origDate); minD.setDate(origDate.getDate() - 1); 
-    const maxD = new Date(origDate); maxD.setDate(origDate.getDate() + 1); 
-    minRescheduleDate = getLocalISODate(minD);
-    maxRescheduleDate = getLocalISODate(maxD);
+    const todayDate = new Date();
+    todayDate.setHours(0,0,0,0);
+    
+    if (rescheduleTarget.booking_type === 'Travel') {
+      // TRAVEL RULE: Must be at least 14 days from today to allow document verification
+      const minTravel = new Date(todayDate);
+      minTravel.setDate(todayDate.getDate() + 14);
+      minRescheduleDate = getLocalISODate(minTravel);
+      
+      // Allow them to reschedule up to 3 months out
+      const maxTravel = new Date(todayDate);
+      maxTravel.setMonth(todayDate.getMonth() + 3);
+      maxRescheduleDate = getLocalISODate(maxTravel);
+      
+    } else {
+      // HOME RULE: Routine emergency reschedule. 
+      // Allow shifting 1 day before or up to 2 days after the original date.
+      const minHome = new Date(origDate);
+      minHome.setDate(origDate.getDate() - 1); 
+      
+      // Don't let them reschedule to a date in the past
+      minRescheduleDate = minHome < todayDate ? getLocalISODate(todayDate) : getLocalISODate(minHome);
+      
+      const maxHome = new Date(origDate);
+      maxHome.setDate(origDate.getDate() + 2);
+      maxRescheduleDate = getLocalISODate(maxHome);
+    }
   }
 
   if (isLoading) {
@@ -238,12 +265,13 @@ export default function PatientHome() {
     const isPast = bDate < today;
     const isPending = booking.booking_status?.includes('Pending');
     const isRejected = booking.booking_status?.includes('Rejected');
+    const isCancelled = booking.booking_status === 'Cancelled';
     
     const style = getStatusStyle(booking.booking_status);
     const displayDay = bDate.toLocaleDateString('en-GB', { weekday: 'short' });
 
     let isNextSession = false;
-    if (!isPast && !isRejected && !nextSessionFound) {
+    if (!isPast && !isRejected && !isCancelled && !nextSessionFound) {
       isNextSession = true;
       nextSessionFound = true; 
     }
@@ -280,13 +308,13 @@ export default function PatientHome() {
         </div>
 
         <div className='flex gap-2 border-t border-slate-100 pt-3'>
-          {!isPast && !isPending && !isRejected && (
+          {!isPast && !isPending && !isRejected && !isCancelled && (
             <>
               <button onClick={() => setRescheduleTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-blue-200 text-blue-600 hover:bg-blue-50'>Reschedule</button>
               <button onClick={() => setCancelDialogTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50'>Cancel</button>
             </>
           )}
-          <button onClick={() => setDetailViewTarget(booking)} className={`flex-1 py-3 rounded-xl text-xs font-bold shadow-md ${isPast ? 'bg-slate-100 text-slate-600 shadow-none' : 'bg-slate-800 text-white hover:bg-slate-900'}`}>
+          <button onClick={() => setDetailViewTarget(booking)} className={`flex-1 py-3 rounded-xl text-xs font-bold shadow-md ${isPast || isCancelled ? 'bg-slate-100 text-slate-600 shadow-none' : 'bg-slate-800 text-white hover:bg-slate-900'}`}>
             View Status
           </button>
         </div>
@@ -442,6 +470,16 @@ export default function PatientHome() {
                         <p className='text-xs font-bold text-red-500 mt-0.5'>Action rejected by clinic</p>
                       </div>
                     </div>
+                  ) : detailViewTarget.booking_status === 'Cancelled' ? (
+                     <div className='relative flex gap-4 items-start'>
+                      <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 bg-red-500 text-white'>
+                        <FiCheckCircle className='text-xs' />
+                      </div>
+                      <div className='pb-1'>
+                        <h4 className='text-sm font-black text-red-700'>Cancelled</h4>
+                        <p className='text-xs font-bold text-red-500 mt-0.5'>Session successfully cancelled</p>
+                      </div>
+                    </div>
                   ) : (
                     <div className='relative flex gap-4 items-start'>
                       <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 bg-emerald-500 text-white'>
@@ -457,7 +495,7 @@ export default function PatientHome() {
               </div>
             </div>
 
-            {new Date(detailViewTarget.booking_date) >= today && !detailViewTarget.booking_status.includes('Pending') && !detailViewTarget.booking_status.includes('Rejected') && (
+            {new Date(detailViewTarget.booking_date) >= today && !detailViewTarget.booking_status.includes('Pending') && !detailViewTarget.booking_status.includes('Rejected') && detailViewTarget.booking_status !== 'Cancelled' && (
               <div className='flex gap-3 pt-2'>
                 <button onClick={() => setRescheduleTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 bg-white hover:bg-slate-50'>Reschedule</button>
                 <button onClick={() => setCancelDialogTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-red-100 text-red-600 bg-red-50 hover:bg-red-100'>Cancel</button>
@@ -491,21 +529,38 @@ export default function PatientHome() {
                 <label className='block text-xs font-black text-amber-800 uppercase tracking-widest mb-2'>Select New Date</label>
                 <input type="date" required min={minRescheduleDate} max={maxRescheduleDate} value={newDate} onChange={e => setNewDate(e.target.value)} className='w-full p-3.5 bg-white border border-amber-200 rounded-xl outline-none focus:border-amber-500 font-bold text-slate-800 text-sm' />
               </div>
+              
+              {/* MEDICAL REALITY WARNING BANNER */}
+              {rescheduleTarget.booking_type === 'Home' && newDate && newDate !== rescheduleTarget.booking_date && (
+                <div className='p-4 mb-4 bg-purple-50 border border-purple-200 rounded-xl flex items-start gap-3 animate-in fade-in'>
+                  <FiAlertCircle className='text-purple-600 text-xl shrink-0 mt-0.5' />
+                  <p className='text-xs font-bold text-purple-800 leading-relaxed'>
+                    Rescheduling this session may require changes to your other sessions this week to maintain safe fluid levels. The clinic manager will review this request.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className='block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 flex justify-between'>
                   <span>Select Shift</span>{newDate && <span className='text-blue-500 text-[10px] animate-pulse'>Checking availability...</span>}
                 </label>
-                <div className='grid grid-cols-2 gap-3'>
-                  <button type="button" onClick={() => setNewShift('Morning')} className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Morning') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
+                {/* Changed from grid-cols-2 to grid-cols-3 to accommodate Evening shift */}
+                <div className='grid grid-cols-3 gap-3'>
+                  <button type="button" onClick={() => setNewShift('Morning')} className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Morning') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
                     <FiClock className='text-xl mb-1' />
                     <span className='text-sm font-black'>Morning</span>
                     <span className={`text-[10px] font-bold ${newShift.includes('Morning') ? 'text-slate-300' : 'text-slate-400'}`}>07:00 - 11:00</span>
                   </button>
-                  <button type="button" onClick={() => setNewShift('Afternoon')} className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Afternoon') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
+                  <button type="button" onClick={() => setNewShift('Afternoon')} className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Afternoon') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
                     <FiClock className='text-xl mb-1' />
                     <span className='text-sm font-black'>Afternoon</span>
                     <span className={`text-[10px] font-bold ${newShift.includes('Afternoon') ? 'text-slate-300' : 'text-slate-400'}`}>12:00 - 16:00</span>
+                  </button>
+                  {/* Added Evening button with standard 4-hour slot and 1-hour turnover gap */}
+                  <button type="button" onClick={() => setNewShift('Evening')} className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1 ${newShift.includes('Evening') ? 'bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
+                    <FiClock className='text-xl mb-1' />
+                    <span className='text-sm font-black'>Evening</span>
+                    <span className={`text-[10px] font-bold ${newShift.includes('Evening') ? 'text-slate-300' : 'text-slate-400'}`}>17:00 - 21:00</span>
                   </button>
                 </div>
               </div>
