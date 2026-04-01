@@ -316,7 +316,7 @@ export default function ManagerDashboard() {
         <div className='flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4'>
           <div>
             <p className='text-sm font-bold text-blue-600 mb-1 flex items-center gap-2'><FiCalendar /> {new Date().toLocaleDateString('en-MY', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-            <h1 className='text-3xl font-black text-slate-800 tracking-tight'>Command Center</h1>
+            <h1 className='text-3xl font-black text-slate-800 tracking-tight'>Branch Dashboard</h1>
             <p className='text-slate-500 mt-1 font-medium flex items-center gap-1.5'><FiMapPin /> {branchData?.branch_name} | {managerName}</p>
           </div>
         </div>

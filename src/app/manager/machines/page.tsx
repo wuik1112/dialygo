@@ -311,15 +311,13 @@ export default function ManagerMachineStatus() {
         
         {/* --- Header --- */}
         <div className='mb-6 flex items-center text-sm font-bold text-slate-400'>
-          <Link href='/manager' className='hover:text-blue-600 transition-colors'>Dashboard</Link>
-          <span className='mx-2'>/</span>
-          <span className='text-slate-700'>Machine Inventory</span>
+
         </div>
 
         <div className='flex flex-col md:flex-row justify-between items-end mb-8 gap-4'>
           <div>
             <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Clinical Asset Management</h1>
-            <p className='text-slate-500 mt-1 font-medium'>Strict oversight of machine capabilities, lifecycles, and patient isolation.</p>
+
           </div>
           <button onClick={handleAddClick} className='px-6 py-2.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 shadow-lg transition-all shrink-0'>
             + Register New Asset

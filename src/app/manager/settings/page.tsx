@@ -346,7 +346,6 @@ export default function ManagerSettings() {
         
         <div className='mb-8'>
           <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Manager Settings</h1>
-          <p className='text-slate-500 mt-1 font-medium'>Manage your personal profile and public branch details.</p>
         </div>
 
         <form onSubmit={handleSaveSettings} className='space-y-8'>

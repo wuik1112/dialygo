@@ -301,14 +301,11 @@ export default function ManagerBookings() {
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans pb-24 flex gap-6 relative'>
       <div className='flex-1 max-w-3xl flex flex-col h-[calc(100vh-100px)]'>
-        <div className='mb-6 flex items-center text-sm font-bold text-slate-400 shrink-0'>
-          <Link href='/manager' className='hover:text-blue-600 transition-colors'>Dashboard</Link>
-          <span className='mx-2'>/</span><span className='text-slate-700'>Bookings Pipeline</span>
-        </div>
+
 
         <div className='mb-6 shrink-0 flex justify-between items-end'>
           <div>
-            <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Request Pipeline</h1>
+            <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Request Management</h1>
           </div>
         </div>
 

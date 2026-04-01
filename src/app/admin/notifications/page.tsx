@@ -102,7 +102,6 @@ export default function NotificationsPage() {
         <div className='flex justify-between items-end mb-8'>
           <div>
             <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Notifications</h1>
-            <p className='text-slate-500 mt-1 font-medium'>Stay updated on schedule changes and booking status.</p>
           </div>
           {notifications.some(n => !n.is_read) && (
             <button 

@@ -349,7 +349,6 @@ export default function BranchManagement() {
         <div className='flex justify-between items-center mb-8'>
           <div>
             <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Branch Management</h1>
-            <p className='text-slate-500 mt-1 font-medium'>Control and monitor all clinical facilities</p>
           </div>
           <button onClick={openAddModal} className='bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-sm'>
             + Add New Branch

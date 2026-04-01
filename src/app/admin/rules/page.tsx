@@ -110,7 +110,6 @@ export default function SystemRules() {
         
         <div className='mb-8'>
           <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>System Configurations</h1>
-          <p className='text-slate-500 mt-1 font-medium'>Manage global booking parameters and network constraints</p>
         </div>
 
         <div className='bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'>
