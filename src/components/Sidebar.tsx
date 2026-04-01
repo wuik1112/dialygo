@@ -118,8 +118,9 @@ export default function Sidebar() {
   return (
     <aside className='fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col font-sans shadow-2xl border-r border-white/5'>
       <div className='p-6 pb-2'>
-        <div className='text-2xl font-black tracking-wider text-blue-500 mb-1 flex items-center gap-2'>
-          <FiActivity className="text-blue-500" /> DialyGo
+        <div className='text-3xl font-black tracking-wider text-blue-500 mb-1 flex items-center gap-2'>
+          <img src="/logo.png" alt="" className="h-8 w-8" />
+          DialyGo
         </div>
         <div className='text-[10px] text-slate-400 font-bold tracking-widest uppercase mb-6 ml-1'>
           {role} PORTAL
