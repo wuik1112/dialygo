@@ -83,6 +83,7 @@ export default function AuthPortal() {
   return (
     <div className='min-h-screen flex items-center justify-center bg-slate-100 font-sans'>
       <div className='bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200'>
+        <img src='/logo.png' alt='DialyGo Logo' className='w-30 h-30 ml-0 mx-auto' />
         <h1 className='text-3xl font-bold text-slate-900 mb-2'>DialyGo</h1>
         
         {isResetMode ? (
@@ -138,7 +139,7 @@ export default function AuthPortal() {
           </>
         ) : (
           <>
-            <p className='text-slate-500 mb-8'>Secure Clinical Login</p>
+            <p className='text-slate-500 mb-8'>Login</p>
             <form onSubmit={handleLogin} className='space-y-4'>
               <div>
                 <label className='block text-sm font-medium text-slate-700 mb-1'>Email Address</label>

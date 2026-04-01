@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useLoadScript, Autocomplete, GoogleMap, Marker } from '@react-google-maps/api';
-import { FiActivity, FiMapPin } from 'react-icons/fi';
+import { FiActivity, FiMapPin, FiXCircle } from 'react-icons/fi';
 
 const libraries: any = ['places'];
 
@@ -33,13 +33,20 @@ export default function BranchManagement() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<any>(null);
   const [branchStats, setBranchStats] = useState({ staff: 0, bookings: 0 });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
+  const [opDays, setOpDays] = useState('Monday - Saturday');
+  const [openTime, setOpenTime] = useState('07:00');
+  const [closeTime, setCloseTime] = useState('21:00');
+
   const [formData, setFormData] = useState({
     name: '',
     address: '',
     contact: '',
-    machines: '',
-    manager_id: ''
+    manager_id: '',
+    session_price: '',
+    lat: null as number | null,
+    lng: null as number | null
   });
 
   async function fetchData() {
@@ -57,9 +64,40 @@ export default function BranchManagement() {
     fetchData();
   }, []);
 
+  const validateField = (name: string, value: string) => {
+    let err = '';
+
+    if (name === 'name') {
+      if (branches.some(b => b.id !== editingId && b.branch_name.toLowerCase() === value.toLowerCase().trim())) {
+        err = 'A branch with this name already exists.';
+      }
+    }
+
+    if (name === 'contact') {
+      if (value.length > 0 && (value.length < 9 || value.length > 11)) {
+        err = 'Contact must be 9-11 digits.';
+      } else if (branches.some(b => b.id !== editingId && b.branch_contact === value)) {
+        err = 'This contact number is already in use by another branch.';
+      }
+    }
+
+    if (name === 'time' && openTime === closeTime) {
+      err = 'Opening and closing times cannot be identical.';
+    }
+
+    setFieldErrors(prev => ({ ...prev, [name]: err }));
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    let newValue = value;
+
+    if (name === 'contact') {
+      newValue = value.replace(/\D/g, ''); 
+    }
+
+    setFormData(prev => ({ ...prev, [name]: newValue }));
+    validateField(name, newValue);
   };
 
   const onLoad = (autoC: google.maps.places.Autocomplete) => {
@@ -70,7 +108,9 @@ export default function BranchManagement() {
     if (autocomplete !== null) {
       const place = autocomplete.getPlace();
       const selectedAddress = place.formatted_address || place.name || '';
-      setFormData(prev => ({ ...prev, address: selectedAddress }));
+      
+      let newLat = formData.lat;
+      let newLng = formData.lng;
 
       if (place.geometry && place.geometry.location) {
         const newLocation = {
@@ -79,7 +119,16 @@ export default function BranchManagement() {
         };
         setMapCenter(newLocation);
         setMarkerPosition(newLocation);
+        newLat = newLocation.lat;
+        newLng = newLocation.lng;
       }
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        address: selectedAddress,
+        lat: newLat,
+        lng: newLng
+      }));
     }
   };
 
@@ -87,7 +136,17 @@ export default function BranchManagement() {
     setViewMode('add');
     setEditingId(null);
     setSelectedBranch(null);
-    setFormData({ name: '', address: '', contact: '', machines: '', manager_id: '' });
+    setFieldErrors({});
+    
+    setOpDays('Monday - Saturday');
+    setOpenTime('07:00');
+    setCloseTime('21:00');
+
+    setFormData({ 
+      name: '', address: '', contact: '', manager_id: '', 
+      session_price: '', lat: null, lng: null 
+    });
+    
     setMapCenter(defaultCenter);
     setMarkerPosition(null);
     setError('');
@@ -98,13 +157,32 @@ export default function BranchManagement() {
     setSelectedBranch(branch);
     setEditingId(branch.id);
     setViewMode('view');
+    setFieldErrors({});
     
+    if (branch.branch_operating_hours) {
+      const parts = branch.branch_operating_hours.split(': ');
+      if (parts.length === 2) {
+        setOpDays(parts[0]);
+        const times = parts[1].split(' - ');
+        if (times.length === 2) {
+          setOpenTime(times[0]);
+          setCloseTime(times[1]);
+        }
+      }
+    } else {
+      setOpDays('Monday - Saturday');
+      setOpenTime('07:00');
+      setCloseTime('21:00');
+    }
+
     setFormData({
       name: branch.branch_name || '',
       address: branch.branch_address || '',
       contact: branch.branch_contact || '',
-      machines: branch.total_machines ? branch.total_machines.toString() : '',
-      manager_id: branch.manager_id ? branch.manager_id.toString() : ''
+      manager_id: branch.manager_id ? branch.manager_id.toString() : '',
+      session_price: branch.session_price ? branch.session_price.toString() : '',
+      lat: branch.latitude || null,
+      lng: branch.longitude || null
     });
     
     setMapCenter(defaultCenter);
@@ -120,7 +198,11 @@ export default function BranchManagement() {
       bookings: bookingCount || 0
     });
 
-    if (isLoaded && window.google) {
+    if (branch.latitude && branch.longitude) {
+      const loc = { lat: Number(branch.latitude), lng: Number(branch.longitude) };
+      setMapCenter(loc);
+      setMarkerPosition(loc);
+    } else if (isLoaded && window.google) {
       const geocoder = new window.google.maps.Geocoder();
       geocoder.geocode({ address: branch.branch_address }, (results, status) => {
         if (status === 'OK' && results && results[0]) {
@@ -139,55 +221,42 @@ export default function BranchManagement() {
 
   const handleSaveBranch = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (openTime === closeTime) {
+      setFieldErrors(prev => ({ ...prev, time: 'Opening and closing times cannot be identical.' }));
+      return;
+    }
+
+    const hasErrors = Object.values(fieldErrors).some(msg => msg !== '');
+    if (hasErrors) {
+      setError('Please correct the highlighted errors before saving.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
-    if (!formData.name.trim() || !formData.address.trim() || !formData.contact.trim() || !formData.machines) {
-      setError('Error: All fields are required and cannot be blank.');
+    if (!formData.name.trim() || !formData.address.trim() || !formData.contact.trim()) {
+      setError('Error: All required fields must be filled.');
       setIsSubmitting(false);
       return;
     }
 
-    const contactRegex = /^[\d\s\-\+\(\)]{8,20}$/;
-    if (!contactRegex.test(formData.contact.trim())) {
-      setError('Error: Please enter a valid contact number (e.g., 03-12345678).');
-      setIsSubmitting(false);
-      return;
-    }
-
-    const machineCount = parseInt(formData.machines);
-    if (isNaN(machineCount) || machineCount < 1) {
-      setError('Error: Total machines must be a valid number greater than 0.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    const isDuplicate = branches.some(b => 
-      b.id !== editingId && 
-      (b.branch_name.toLowerCase() === formData.name.trim().toLowerCase() || 
-       b.branch_address.toLowerCase() === formData.address.trim().toLowerCase())
-    );
-
-    if (isDuplicate) {
-      setError('Error: A branch with this name or location already exists.');
-      setIsSubmitting(false);
-      return;
-    }
+    const compiledHours = `${opDays}: ${openTime} - ${closeTime}`;
+    const newManagerId = formData.manager_id ? parseInt(formData.manager_id) : null;
 
     const payload: any = {
       branch_name: formData.name.trim(),
       branch_address: formData.address.trim(),
       branch_contact: formData.contact.trim(),
-      total_machines: machineCount,
-      manager_id: formData.manager_id ? parseInt(formData.manager_id) : null
+      branch_operating_hours: compiledHours,
+      session_price: formData.session_price ? parseFloat(formData.session_price) : null,
+      manager_id: newManagerId,
+      latitude: formData.lat,
+      longitude: formData.lng
     };
 
     if (viewMode === 'edit' && editingId && selectedBranch) {
-      const machineDifference = machineCount - selectedBranch.total_machines;
-      const newAvailableSlots = selectedBranch.available_slots + machineDifference;
-      
-      payload.available_slots = newAvailableSlots < 0 ? 0 : newAvailableSlots;
-
       const { error: updateError } = await supabase.from('branches').update(payload).eq('id', editingId);
       
       if (updateError) {
@@ -195,11 +264,27 @@ export default function BranchManagement() {
         setIsSubmitting(false);
         return;
       }
+
+      // --- NEW TWO-WAY SYNC LOGIC FOR EDIT ---
+      // If the manager has changed, update the users table to reflect the new assignments
+      if (selectedBranch.manager_id !== newManagerId) {
+        // Clear branch assignment from the old manager
+        if (selectedBranch.manager_id) {
+          await supabase.from('users').update({ branch_id: null }).eq('user_id', selectedBranch.manager_id);
+        }
+        // Assign the branch to the new manager
+        if (newManagerId) {
+          await supabase.from('users').update({ branch_id: editingId }).eq('user_id', newManagerId);
+        }
+      }
+
     } else if (viewMode === 'add') {
-      payload.available_slots = machineCount;
+      payload.total_machines = 0;
+      payload.available_slots = 0;
       payload.status = 'Active';
 
-      const { error: insertError } = await supabase.from('branches').insert([payload]);
+      // We added .select() here to guarantee Supabase returns the newly created branch ID
+      const { data: newBranchData, error: insertError } = await supabase.from('branches').insert([payload]).select();
       
       if (insertError) {
         if (insertError.message.includes('branches_pkey')) {
@@ -209,6 +294,13 @@ export default function BranchManagement() {
         }
         setIsSubmitting(false);
         return;
+      }
+
+      // --- NEW TWO-WAY SYNC LOGIC FOR ADD ---
+      // Apply the newly generated branch ID to the selected manager's profile
+      if (newManagerId && newBranchData && newBranchData.length > 0) {
+        const generatedBranchId = newBranchData[0].id;
+        await supabase.from('users').update({ branch_id: generatedBranchId }).eq('user_id', newManagerId);
       }
     }
 
@@ -275,6 +367,9 @@ export default function BranchManagement() {
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
           {filteredBranches.map(branch => {
             const isActive = branch.status === 'Active';
+            const usedMachines = branch.total_machines - branch.available_slots;
+            const utilizationPercent = branch.total_machines > 0 ? (usedMachines / branch.total_machines) * 100 : 0;
+
             return (
               <div key={branch.id} className={`bg-white p-6 rounded-2xl border ${isActive ? 'border-slate-200' : 'border-red-100 bg-red-50/20'} shadow-sm flex flex-col hover:shadow-md transition-shadow`}>
                 <div className='flex justify-between items-start mb-4'>
@@ -291,12 +386,15 @@ export default function BranchManagement() {
                   </div>
                   
                   <div>
-                    <div className='flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-tighter mb-1.5'>
-                      <span>Machine Utilization</span>
-                      <span>{branch.total_machines - branch.available_slots} / {branch.total_machines}</span>
+                    <div className='flex justify-between items-end mb-1.5'>
+                      <span className='text-[11px] font-bold text-slate-400 uppercase tracking-tighter'>Machine Utilization</span>
+                      <span className='text-[11px] font-black text-slate-700'>{usedMachines} / {branch.total_machines}</span>
                     </div>
-                    <div className='w-full bg-slate-100 rounded-full h-2'>
-                      <div className={`${isActive ? 'bg-blue-500' : 'bg-slate-300'} h-2 rounded-full transition-all`} style={{ width: `${((branch.total_machines - branch.available_slots) / branch.total_machines) * 100}%` }}></div>
+                    <div className='w-full bg-slate-100 rounded-full h-2 overflow-hidden'>
+                      <div 
+                        className={`${isActive ? 'bg-blue-500' : 'bg-slate-300'} h-full rounded-full transition-all`} 
+                        style={{ width: `${utilizationPercent}%` }}
+                      ></div>
                     </div>
                   </div>
                 </div>
@@ -343,9 +441,21 @@ export default function BranchManagement() {
                         {managers.find(m => m.user_id === selectedBranch.manager_id)?.user_fullname || 'Unassigned'}
                       </p>
                     </div>
+                    <div className='grid grid-cols-2 gap-4'>
+                      <div>
+                        <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Contact Number</h3>
+                        <p className='text-sm text-slate-800'>{selectedBranch.branch_contact}</p>
+                      </div>
+                      <div>
+                        <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Session Price</h3>
+                        <p className='text-sm text-emerald-600 font-bold'>
+                          {selectedBranch.session_price ? `RM ${selectedBranch.session_price}` : 'Not Set'}
+                        </p>
+                      </div>
+                    </div>
                     <div>
-                      <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Contact Number</h3>
-                      <p className='text-sm text-slate-800'>{selectedBranch.branch_contact}</p>
+                      <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Operating Hours</h3>
+                      <p className='text-sm text-slate-800'>{selectedBranch.branch_operating_hours || 'Mon-Sat, 7am - 9pm'}</p>
                     </div>
                     <div>
                       <h3 className='text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1'>Official Address</h3>
@@ -399,7 +509,8 @@ export default function BranchManagement() {
                   <div className='grid grid-cols-2 gap-4'>
                     <div className='col-span-2'>
                       <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Branch Name</label>
-                      <input type='text' name='name' required className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10' value={formData.name} onChange={handleInputChange} />
+                      <input type='text' name='name' required className={`w-full p-3.5 bg-slate-50 border rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${fieldErrors.name ? 'border-red-500' : 'border-slate-200'}`} value={formData.name} onChange={handleInputChange} />
+                      {fieldErrors.name && <p className="text-red-500 text-[10px] font-bold mt-1 animate-pulse">{fieldErrors.name}</p>}
                     </div>
                     
                     <div className='col-span-2'>
@@ -422,12 +533,38 @@ export default function BranchManagement() {
 
                     <div>
                       <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Contact Number</label>
-                      <input type='text' name='contact' required className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500' value={formData.contact} onChange={handleInputChange} />
+                      <input type='text' name='contact' required className={`w-full p-3.5 bg-slate-50 border rounded-xl outline-none focus:border-blue-500 ${fieldErrors.contact ? 'border-red-500' : 'border-slate-200'}`} value={formData.contact} onChange={handleInputChange} />
+                      {fieldErrors.contact && <p className="text-red-500 text-[10px] font-bold mt-1 animate-pulse">{fieldErrors.contact}</p>}
                     </div>
 
                     <div>
-                      <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Total Machines</label>
-                      <input type='number' name='machines' min='1' required className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500' value={formData.machines} onChange={handleInputChange} />
+                      <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Session Price (RM)</label>
+                      <input type='number' name='session_price' min='0' step='0.01' className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500' value={formData.session_price} onChange={handleInputChange} placeholder="e.g. 150.00" />
+                    </div>
+
+                    <div className={`col-span-2 p-5 rounded-xl border transition-colors ${fieldErrors.time ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className='flex justify-between items-center mb-4'>
+                        <h3 className={`text-xs font-bold uppercase tracking-widest ${fieldErrors.time ? 'text-red-600' : 'text-slate-500'}`}>Clinic Operating Hours</h3>
+                        {fieldErrors.time && <span className='text-red-600 text-xs font-bold animate-pulse flex items-center gap-1'><FiXCircle /> {fieldErrors.time}</span>}
+                      </div>
+                      <div className='flex flex-col md:flex-row gap-4 items-end'>
+                        <div className='flex-1 w-full'>
+                          <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Active Days</label>
+                          <select value={opDays} onChange={e => setOpDays(e.target.value)} className='w-full p-3 bg-white border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800'>
+                            <option value="Monday - Saturday">Monday - Saturday (Standard)</option>
+                            <option value="Monday - Friday">Monday - Friday</option>
+                            <option value="Everyday (Mon-Sun)">Everyday (Mon-Sun)</option>
+                          </select>
+                        </div>
+                        <div className='w-full md:w-32'>
+                          <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Opening</label>
+                          <input type="time" required value={openTime} onChange={e => { setOpenTime(e.target.value); setFieldErrors(prev => ({...prev, time: ''})); }} className='w-full p-3 bg-white border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800' />
+                        </div>
+                        <div className='w-full md:w-32'>
+                          <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Closing</label>
+                          <input type="time" required value={closeTime} onChange={e => { setCloseTime(e.target.value); setFieldErrors(prev => ({...prev, time: ''})); }} className='w-full p-3 bg-white border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800' />
+                        </div>
+                      </div>
                     </div>
 
                     <div className='col-span-2'>

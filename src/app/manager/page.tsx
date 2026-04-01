@@ -19,6 +19,7 @@ const getLocalISODate = (d: Date) => {
 
 export default function ManagerDashboard() {
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [branchData, setBranchData] = useState<any>(null);
   const [managerName, setManagerName] = useState('');
   
@@ -49,13 +50,17 @@ export default function ManagerDashboard() {
 
   const fetchDashboardData = async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) return;
 
       const email = sessionData.session.user.email;
       const { data: userData } = await supabase.from('users').select('user_id, user_fullname, branch_id').eq('user_email', email).single();
-      if (!userData || !userData.branch_id) throw new Error("No branch assigned.");
+      if (!userData || !userData.branch_id) {
+        setError("You currently do not have a branch assigned to your manager profile. Please contact the system administrator to link a branch to your account.");
+        return; 
+      }
       
       setManagerName(userData.user_fullname);
       const branchId = userData.branch_id;
@@ -232,6 +237,24 @@ export default function ManagerDashboard() {
       fetchDashboardData(); 
     } catch (error: any) { alert(`Error updating patient: ${error.message}`); } finally { setIsSaving(false); }
   };
+
+  // Add this block before the loading check
+  if (error) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4'>
+        <div className='bg-white p-8 rounded-3xl border border-rose-100 shadow-xl max-w-md w-full text-center'>
+          <div className='w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6'>
+            <FiAlertTriangle className='text-4xl text-rose-500' />
+          </div>
+          <h2 className='text-2xl font-black text-slate-800 mb-3'>Action Required</h2>
+          <p className='text-slate-500 font-medium mb-8 leading-relaxed'>{error}</p>
+          <Link href="/" className='px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors inline-block'>
+            Return to Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading && !branchData) {
     return (

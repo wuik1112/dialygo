@@ -309,7 +309,6 @@ export default function ManagerBookings() {
         <div className='mb-6 shrink-0 flex justify-between items-end'>
           <div>
             <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Request Pipeline</h1>
-            <p className='text-slate-500 mt-1 font-medium'>Review exceptions: Travel, Reschedules, and Cancellations.</p>
           </div>
         </div>
 

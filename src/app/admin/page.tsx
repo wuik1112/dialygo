@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { FiUsers, FiSettings, FiBarChart2, FiActivity } from 'react-icons/fi';
+import { FiUsers, FiSettings, FiBarChart2, FiActivity, FiAlertCircle } from 'react-icons/fi';
 
 export default function AdminDashboard() {
   const [data, setData] = useState<any>(null);
@@ -11,88 +11,103 @@ export default function AdminDashboard() {
   useEffect(() => {
     async function fetchDashboardData() {
       try {
-        const [branchesRes, bookingsRes, patientsRes, usersRes] = await Promise.all([
-          supabase.from('branches').select('*').eq('status', 'Active'),
-          supabase.from('bookings').select('booking_date, booking_session_time, branch_id, patient_id, booking_status'),
-          supabase.from('patients').select('user_id, home_branch_id'),
-          supabase.from('users').select('user_id, role_id, user_is_active')
+        const [branchesRes, bookingsRes, patientsRes] = await Promise.all([
+          supabase.from('branches').select('id, branch_name, total_machines').eq('status', 'Active'),
+          // Included booking_date to resolve the TypeScript error and enable travel logic
+          supabase.from('bookings').select('branch_id, patient_id, booking_status, booking_date, booking_session_time').neq('booking_status', 'Cancelled'),
+          supabase.from('patients').select('patient_id, home_branch_id')
         ]);
 
-        if (branchesRes.error) throw branchesRes.error;
-        
+        if (branchesRes.error || bookingsRes.error || patientsRes.error) throw new Error('Data fetch failed');
+
         const branches = branchesRes.data || [];
         const bookings = bookingsRes.data || [];
         const patients = patientsRes.data || [];
-        const users = usersRes.data || [];
 
-        const totalActivePatients = users.filter(u => u.role_id === 5 && u.user_is_active).length;
+        const todayStr = new Date().toISOString().split('T')[0];
 
-        let totalNetworkMachines = 0;
-        let totalAvailableSlots = 0;
+        // 1. Live Branch Occupancy & Cross-Branch Visits
+        let totalActiveTravelers = 0;
         
-        const occupancyData = branches.map(b => {
-          totalNetworkMachines += b.total_machines || 0;
-          totalAvailableSlots += b.available_slots || 0;
+        const occupancyData = branches.map((branch) => {
+          // TRUE CAPACITY: 1 machine = 6 home patients (3 shifts * 2 cohorts: MWF/TTS)
+          const totalBranchCapacity = (branch.total_machines || 0) * 6;
           
-          const usedSlots = (b.total_machines || 0) - (b.available_slots || 0);
-          const occupancy = b.total_machines ? Math.round((usedSlots / b.total_machines) * 100) : 0;
-          
-          return { name: b.branch_name, occupancy, usedSlots, total: b.total_machines };
+          const homePatientsList = patients.filter(p => p.home_branch_id === branch.id);
+          const homePatientsCount = homePatientsList.length;
+
+          // Travel Patients actively visiting THIS branch TODAY
+          const activeTravelersToday = bookings.filter(b => 
+            b.branch_id === branch.id && 
+            b.booking_date === todayStr &&
+            !homePatientsList.some(hp => hp.patient_id === b.patient_id) 
+          ).length;
+
+          totalActiveTravelers += activeTravelersToday;
+          const totalUsedCapacity = homePatientsCount + activeTravelersToday;
+
+          const occupancy = totalBranchCapacity > 0 
+            ? Math.round((totalUsedCapacity / totalBranchCapacity) * 100) 
+            : 0;
+
+          return {
+            uniqueKey: branch.id || branch.branch_name, 
+            name: branch.branch_name,
+            occupancy,
+            homePatients: homePatientsCount,
+            travelPatients: activeTravelersToday,
+            totalSlots: totalBranchCapacity,
+            usedSlots: totalUsedCapacity
+          };
         });
 
-        const networkUtilization = totalNetworkMachines ? Math.round(((totalNetworkMachines - totalAvailableSlots) / totalNetworkMachines) * 100) : 0;
-
+        // 2. Popular Session Times
         let morning = 0, afternoon = 0, evening = 0;
         bookings.forEach(b => {
           const shift = b.booking_session_time?.toLowerCase();
-          if (shift === 'morning') morning++;
-          else if (shift === 'afternoon') afternoon++;
-          else if (shift === 'evening') evening++;
+          if (shift?.includes('morning')) morning++;
+          else if (shift?.includes('afternoon')) afternoon++;
+          else if (shift?.includes('evening')) evening++;
         });
-        
-        const totalSessions = morning + afternoon + evening;
         const maxSessionLoad = Math.max(morning, afternoon, evening, 1);
 
-        const crossBranchVisits = bookings.filter(b => {
-          const patientProfile = patients.find(p => p.user_id === b.patient_id);
-          return patientProfile && b.branch_id !== patientProfile.home_branch_id;
-        }).length;
-
+        // 3. Weekly Patient Load
         const weeklyLoad = [0, 0, 0, 0, 0, 0, 0];
         bookings.forEach(b => {
           if (b.booking_date) {
             const date = new Date(b.booking_date);
-            const day = date.getDay();
-            const index = day === 0 ? 6 : day - 1;
-            weeklyLoad[index]++;
+            const day = date.getDay(); 
+            const index = day === 0 ? 6 : day - 1; 
+            if (index >= 0 && index < 7) weeklyLoad[index]++;
           }
         });
         const maxWeeklyLoad = Math.max(...weeklyLoad, 1);
 
+        const totalNetSlots = occupancyData.reduce((acc, b) => acc + b.totalSlots, 0);
+        const totalNetUsed = occupancyData.reduce((acc, b) => acc + b.usedSlots, 0);
+
         setData({
-          totalActivePatients,
-          networkUtilization,
-          totalNetworkMachines,
-          branches: occupancyData,
-          sessionTimes: { morning, afternoon, evening, total: totalSessions, max: maxSessionLoad },
-          crossBranchVisits,
+          occupancyData,
+          networkUtilization: totalNetSlots > 0 ? Math.round((totalNetUsed / totalNetSlots) * 100) : 0,
+          totalMachines: branches.reduce((acc, b) => acc + (b.total_machines || 0), 0),
+          totalPatients: patients.length,
+          sessionTimes: { morning, afternoon, evening, max: maxSessionLoad },
+          crossBranchVisits: totalActiveTravelers,
           weeklyLoad,
           maxWeeklyLoad,
-          isEmpty: branches.length === 0
+          isEmpty: branches.length === 0 || patients.length === 0
         });
-        
-        setIsError(false);
-      } catch (error) {
-        console.error("Dashboard fetch error:", error);
+      } catch (err) {
+        console.error("Dashboard Logic Error:", err);
         setIsError(true);
       } finally {
         setIsLoading(false);
       }
     }
-    
     fetchDashboardData();
   }, []);
 
+  // Standardized Loading Animation
   if (isLoading) {
     return (
       <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
@@ -104,25 +119,29 @@ export default function AdminDashboard() {
     );
   }
 
+  // UC-02 Exception Path 1: Database Connection Failure
   if (isError) {
     return (
-      <main className='p-8 bg-slate-50 min-h-screen font-sans'>
-        <div className='max-w-6xl mx-auto'>
-          <div className='p-6 bg-red-50 border border-red-200 rounded-2xl text-red-800 text-center'>
-            <h2 className='text-lg font-bold mb-2'>Connection Error</h2>
-            <p>Unable to retrieve real-time network data from the database. Please check your connection and try again.</p>
-          </div>
+      <main className='p-8 bg-slate-50 min-h-screen flex items-center justify-center font-sans'>
+        <div className='max-w-md w-full p-8 bg-white border border-red-100 rounded-3xl shadow-xl text-center'>
+          <FiAlertCircle className='text-red-500 text-5xl mx-auto mb-4' />
+          <h2 className='text-xl font-bold text-slate-800 mb-2'>Connection Error</h2>
+          <p className='text-slate-500 text-sm mb-6'>Unable to load dashboard metrics. Please try again later.</p>
+          <button onClick={() => window.location.reload()} className='w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors'>
+            Retry Connection
+          </button>
         </div>
       </main>
     );
   }
 
+  // UC-02 Exception Path 3: Zero Active Branches / Zero Patient Data
   if (data?.isEmpty) {
     return (
-      <main className='p-8 bg-slate-50 min-h-screen font-sans'>
-        <div className='max-w-6xl mx-auto text-center py-20 bg-white rounded-3xl border border-slate-200 shadow-sm'>
-          <h1 className='text-2xl font-bold text-slate-800 mb-2'>Network Dashboard</h1>
-          <p className='text-slate-500'>No active branches found. Please register branches in the network to view telemetry.</p>
+      <main className='p-8 bg-slate-50 min-h-screen flex items-center justify-center font-sans'>
+        <div className='text-center p-12 bg-white rounded-3xl border border-slate-200 shadow-sm'>
+          <FiBarChart2 className='text-slate-300 text-6xl mx-auto mb-4' />
+          <p className='text-slate-500 font-medium'>No operational data available for the current period.</p>
         </div>
       </main>
     );
@@ -132,126 +151,142 @@ export default function AdminDashboard() {
     <main className='p-8 bg-slate-50 min-h-screen font-sans'>
       <div className='max-w-6xl mx-auto'>
         
-        <div className='mb-8'>
-          <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Network Dashboard</h1>
-          <p className='text-slate-500 mt-1 font-medium'>Real-time aggregated data and operational health</p>
+        <header className='mb-10'>
+          <h1 className='text-3xl font-black text-slate-900'>Network Dashboard</h1>
+          <p className='text-slate-500 font-medium'>Live Capacity & Patient Mobility</p>
+        </header>
+
+        {/* Global KPIs */}
+        <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-10'>
+          <StatCard label="Network Load" value={`${data.networkUtilization}%`} icon={<FiBarChart2 />} />
+          <StatCard label="Total Machines" value={data.totalMachines} icon={<FiSettings />} />
+          <StatCard label="Registered Patients" value={data.totalPatients} icon={<FiUsers />} />
         </div>
 
-        <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-6'>
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
-            <div className='h-14 w-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl'><FiUsers /></div>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>Total Patients</p>
-              <p className='text-3xl font-black text-slate-800'>{data.totalActivePatients}</p>
-            </div>
-          </div>
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-8'>
           
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
-            <div className='h-14 w-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl'><FiSettings /></div>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>Network Machines</p>
-              <p className='text-3xl font-black text-slate-800'>{data.totalNetworkMachines}</p>
+          {/* Live Branch Occupancy */}
+          <section className='bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden'>
+            <div className='p-6 border-b border-slate-100 bg-slate-50/50'>
+              <h2 className='font-bold text-slate-800'>Live Branch Occupancy</h2>
             </div>
-          </div>
+            <table className='w-full text-left border-collapse'>
+              <thead>
+                <tr className='text-[10px] uppercase tracking-widest text-slate-400 border-b border-slate-100'>
+                  <th className='p-6 font-black'>Branch Name</th>
+                  <th className='p-6 font-black'>Slot Occupancy</th>
+                  <th className='p-6 font-black text-right'>Usage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.occupancyData.map((branch: any) => (
+                  <tr key={branch.uniqueKey} className='border-b border-slate-50 hover:bg-slate-50/50 transition-colors'>
+                    <td className='p-6 font-bold text-slate-700'>
+                      {branch.name}
+                      <div className='flex gap-2 mt-2'>
+                        <span className='px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] rounded font-bold'>Home: {branch.homePatients}</span>
+                        <span className='px-2 py-0.5 bg-orange-50 text-orange-700 text-[10px] rounded font-bold'>Travel: {branch.travelPatients}</span>
+                      </div>
+                    </td>
+                    <td className='p-6 text-sm text-slate-600'>
+                      <div className='flex flex-col gap-1.5'>
+                        <div className='w-full bg-slate-100 h-1.5 rounded-full overflow-hidden'>
+                          <div 
+                            className={`h-full rounded-full transition-all duration-700 ${branch.occupancy > 85 ? 'bg-red-500' : 'bg-indigo-600'}`} 
+                            style={{ width: `${branch.occupancy}%` }}
+                          />
+                        </div>
+                        <span className='text-[10px] font-bold text-slate-400'>{branch.usedSlots} / {branch.totalSlots} Slots</span>
+                      </div>
+                    </td>
+                    <td className='p-6 text-right font-black text-slate-900'>{branch.occupancy}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
 
-          <div className='bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-5'>
-            <div className='h-14 w-14 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl'><FiBarChart2 /></div>
-            <div>
-              <p className='text-[11px] font-bold text-slate-400 uppercase tracking-widest'>System Utilization</p>
-              <p className='text-3xl font-black text-slate-800'>{data.networkUtilization}%</p>
-            </div>
-          </div>
-        </div>
+          <div className='space-y-8'>
+            {/* Popular Session Times */}
+            <section className='bg-white p-8 rounded-3xl border border-slate-200 shadow-sm'>
+              <h2 className='text-xs font-black text-slate-400 mb-8 uppercase tracking-[0.2em]'>Popular Session Times</h2>
+              <div className='flex items-end gap-6 h-40 border-b border-slate-100 pb-2'>
+                <Bar 
+                  height={((data?.sessionTimes?.morning || 0) / (data?.sessionTimes?.max || 1)) * 100} 
+                  label="Morning" 
+                  color="bg-sky-400" 
+                  count={data?.sessionTimes?.morning || 0} 
+                />
+                <Bar 
+                  height={((data?.sessionTimes?.afternoon || 0) / (data?.sessionTimes?.max || 1)) * 100} 
+                  label="Afternoon" 
+                  color="bg-blue-600" 
+                  count={data?.sessionTimes?.afternoon || 0} 
+                />
+                <Bar 
+                  height={((data?.sessionTimes?.evening || 0) / (data?.sessionTimes?.max || 1)) * 100} 
+                  label="Evening" 
+                  color="bg-indigo-800" 
+                  count={data?.sessionTimes?.evening || 0} 
+                />
+              </div>
+            </section>
 
-        <div className='grid grid-cols-1 md:grid-cols-2 gap-6 mb-8'>
-          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm'>
-            <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Live Branch Occupancy</h2>
-            <div className='space-y-5'>
-              {data.branches.map((branch: any) => (
-                <div key={branch.name}>
-                  <div className='flex justify-between text-sm mb-2'>
-                    <span className='font-semibold text-slate-700'>{branch.name}</span>
-                    <span className='font-bold text-blue-600'>{branch.occupancy}% <span className='text-slate-400 font-medium text-xs'>({branch.usedSlots}/{branch.total})</span></span>
-                  </div>
-                  <div className='w-full bg-slate-100 rounded-full h-2.5'>
+            {/* Cross-Branch Visits & Weekly Load */}
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-6'>
+              <div className='bg-emerald-600 p-6 rounded-3xl text-white shadow-lg shadow-emerald-100 flex flex-col justify-center'>
+                <p className='text-[10px] font-black uppercase tracking-widest opacity-80 mb-2'>Cross-Branch Visits</p>
+                <div className='text-5xl font-black mb-1'>{data?.crossBranchVisits || 0}</div>
+                <p className='text-xs font-bold opacity-90'>Active guest patients today</p>
+              </div>
+
+              <div className='bg-white p-6 rounded-3xl border border-slate-200'>
+                <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4'>Weekly Patient Load</p>
+                <div className='flex items-end gap-1 h-16'>
+                  {/* Safely map over weeklyLoad or fallback to an empty array */}
+                  {(data?.weeklyLoad || []).map((v: number, i: number) => (
                     <div 
-                      className={`h-2.5 rounded-full transition-all duration-1000 ${branch.occupancy > 85 ? 'bg-red-500' : branch.occupancy > 60 ? 'bg-amber-400' : 'bg-blue-500'}`} 
-                      style={{ width: `${branch.occupancy}%` }}
-                    ></div>
-                  </div>
+                      key={i} 
+                      className='flex-1 bg-slate-200 rounded-sm hover:bg-indigo-400 transition-colors relative group' 
+                      style={{ height: `${(v / (data?.maxWeeklyLoad || 1)) * 100}%`, minHeight: '4px' }}
+                    >
+                      <span className='absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity'>
+                        {v}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
-            <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Popular Session Times</h2>
-            <div className='flex items-end gap-4 h-32 mt-auto border-b border-slate-100 pb-2'>
-              
-              <div className='flex-1 flex flex-col justify-end group relative h-full'>
-                {data.sessionTimes.morning > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.morning}</span>}
-                <div 
-                  className='bg-sky-400 rounded-t-md hover:bg-sky-500 transition-all duration-700 w-full mt-auto' 
-                  style={{ height: `${(data.sessionTimes.morning / data.sessionTimes.max) * 100}%`, minHeight: data.sessionTimes.morning > 0 ? '10%' : '0%' }}
-                ></div>
-              </div>
-
-              <div className='flex-1 flex flex-col justify-end group relative h-full'>
-                {data.sessionTimes.afternoon > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.afternoon}</span>}
-                <div 
-                  className='bg-blue-600 rounded-t-md hover:bg-blue-700 transition-all duration-700 w-full mt-auto' 
-                  style={{ height: `${(data.sessionTimes.afternoon / data.sessionTimes.max) * 100}%`, minHeight: data.sessionTimes.afternoon > 0 ? '10%' : '0%' }}
-                ></div>
-              </div>
-
-              <div className='flex-1 flex flex-col justify-end group relative h-full'>
-                {data.sessionTimes.evening > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{data.sessionTimes.evening}</span>}
-                <div 
-                  className='bg-indigo-800 rounded-t-md hover:bg-indigo-900 transition-all duration-700 w-full mt-auto' 
-                  style={{ height: `${(data.sessionTimes.evening / data.sessionTimes.max) * 100}%`, minHeight: data.sessionTimes.evening > 0 ? '10%' : '0%' }}
-                ></div>
-              </div>
-
-            </div>
-            
-            <div className='flex gap-4 mt-3'>
-              <span className='flex-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest'>Morning</span>
-              <span className='flex-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest'>Afternoon</span>
-              <span className='flex-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest'>Evening</span>
-            </div>
-          </div>
-
-          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm'>
-            <h2 className='text-sm font-bold text-slate-800 mb-2 uppercase tracking-wider'>Cross-Branch Mobility</h2>
-            <p className='text-xs text-slate-500 mb-6'>Patients currently booked outside their home branch.</p>
-            <div className='flex items-center justify-center h-32 bg-emerald-50 rounded-xl border border-emerald-100'>
-              <div className='text-center'>
-                <div className='text-5xl font-black text-emerald-600'>{data.crossBranchVisits}</div>
-                <div className='text-sm font-bold text-emerald-800 mt-2 uppercase tracking-widest'>Active Guest Bookings</div>
-              </div>
-            </div>
-          </div>
-
-          <div className='bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col'>
-            <h2 className='text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider'>Weekly System Load</h2>
-            <div className='flex items-end gap-2 h-32 mt-auto border-b border-slate-100 pb-2'>
-              {data.weeklyLoad.map((count: number, index: number) => (
-                <div key={index} className='flex-1 flex flex-col justify-end group relative h-full'>
-                  {count > 0 && <span className='text-[10px] font-bold text-slate-400 text-center mb-1'>{count}</span>}
-                  <div 
-                    className='bg-indigo-500 rounded-t-md hover:bg-indigo-600 transition-all duration-700 w-full mt-auto' 
-                    style={{ height: `${(count / data.maxWeeklyLoad) * 100}%`, minHeight: count > 0 ? '10%' : '0%' }}
-                  ></div>
+                <div className='flex justify-between text-[8px] font-bold text-slate-300 uppercase mt-2'>
+                  <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
                 </div>
-              ))}
-            </div>
-            <div className='flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-3 px-1'>
-              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
             </div>
           </div>
 
         </div>
       </div>
     </main>
+  );
+}
+
+function StatCard({ label, value, icon }: any) {
+  return (
+    <div className='bg-white p-6 rounded-2xl border border-slate-200 flex items-center gap-4 shadow-sm'>
+      <div className='h-12 w-12 rounded-xl bg-slate-50 text-slate-600 flex items-center justify-center text-xl'>{icon}</div>
+      <div>
+        <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>{label}</p>
+        <p className='text-2xl font-black text-slate-900'>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function Bar({ height, label, color, count }: any) {
+  return (
+    <div className='flex-1 flex flex-col justify-end group h-full'>
+      <span className='opacity-0 group-hover:opacity-100 text-[10px] font-bold text-slate-400 text-center mb-1 transition-opacity'>{count}</span>
+      <div className={`${color} rounded-t-xl transition-all duration-700 w-full`} style={{ height: `${height}%`, minHeight: count > 0 ? '10%' : '2px' }}></div>
+      <span className='text-[9px] font-black text-slate-400 uppercase tracking-tighter text-center mt-3'>{label}</span>
+    </div>
   );
 }

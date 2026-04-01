@@ -18,6 +18,17 @@ const getMonday = (d: Date) => {
   return new Date(date.setDate(diff));
 };
 
+const parseDateLocal = (dateStr: string) => {
+  if (!dateStr) return new Date();
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+const getLocalDisplayDay = (dateStr: string) => {
+  if (!dateStr) return '';
+  return parseDateLocal(dateStr).toLocaleDateString('en-MY', { weekday: 'long' });
+};
+
 const PATIENTS_PER_NURSE = 4;
 
 export default function ManagerWeeklyRoster() {
@@ -74,6 +85,7 @@ export default function ManagerWeeklyRoster() {
 
       const [branchRes, nursesRes] = await Promise.all([
         supabase.from('branches').select('*').eq('id', branchId).single(),
+        // This strictly pulls ONLY nurses currently assigned to your branch
         supabase.from('users').select('user_id, user_fullname, staff(max_weekly_hours)').eq('branch_id', branchId).eq('role_id', 4)
       ]);
 
@@ -82,20 +94,24 @@ export default function ManagerWeeklyRoster() {
 
       const weekStartStr = getLocalISODate(weekDays[0]);
       const weekEndStr = getLocalISODate(weekDays[6]);
+      
+      // RESTORED: Strictly fetch shifts assigned to THIS branch
       const { data: weekData } = await supabase
         .from('staff_roster')
         .select('*')
-        .eq('branch_id', branchId)
+        .eq('branch_id', branchId) 
         .gte('shift_date', weekStartStr)
         .lte('shift_date', weekEndStr);
       setWeeklyRoster(weekData || []);
 
       const monthStartStr = getLocalISODate(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1));
       const monthEndStr = getLocalISODate(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0));
+      
+      // RESTORED: Strictly fetch shifts assigned to THIS branch
       const { data: monthData } = await supabase
         .from('staff_roster')
         .select('shift_date, shift_type')
-        .eq('branch_id', branchId)
+        .eq('branch_id', branchId) 
         .gte('shift_date', monthStartStr)
         .lte('shift_date', monthEndStr)
         .eq('shift_type', 'WORK'); 
@@ -111,9 +127,13 @@ export default function ManagerWeeklyRoster() {
   useEffect(() => { fetchData(); }, [currentWeekStart, currentMonth]);
 
   const handleEmptyCellClick = (nurseId: number, dateStr: string) => {
+    // Check if the clicked date is a Sunday
+    const isSunday = parseDateLocal(dateStr).getDay() === 0;
+
     setFormData({ 
       nurse_id: nurseId.toString(), 
-      shift_type: 'WORK', 
+      // Automatically default to OFF_DAY if it's Sunday
+      shift_type: isSunday ? 'OFF_DAY' : 'WORK', 
       startDate: dateStr, 
       endDate: dateStr,
       start_time: '08:00', 
@@ -160,14 +180,16 @@ export default function ManagerWeeklyRoster() {
 
   const timeToMins = (timeStr: string | null) => {
     if (!timeStr) return 0;
-    const [h, m] = timeStr.split(':').map(Number);
+    const cleanStr = timeStr.trim().substring(0, 5); 
+    const [h, m] = cleanStr.split(':').map(Number);
     return h * 60 + m;
   };
 
   const getDatesInRange = (startStr: string, endStr: string) => {
     const dates = [];
-    let currentDate = new Date(startStr);
-    const stopDate = new Date(endStr);
+    let currentDate = parseDateLocal(startStr);
+    const stopDate = parseDateLocal(endStr);
+    
     while (currentDate <= stopDate) {
       dates.push(getLocalISODate(currentDate));
       currentDate.setDate(currentDate.getDate() + 1);
@@ -177,6 +199,8 @@ export default function ManagerWeeklyRoster() {
 
   const handleSaveShift = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return; 
+    
     setIsSaving(true);
     setMessage({ type: '', text: '' });
 
@@ -185,7 +209,7 @@ export default function ManagerWeeklyRoster() {
       const isWork = formData.shift_type === 'WORK';
       const finalEndDate = isWork ? formData.startDate : formData.endDate;
 
-      if (new Date(finalEndDate) < new Date(formData.startDate)) {
+      if (finalEndDate < formData.startDate) {
         throw new Error("End Date cannot be before Start Date.");
       }
 
@@ -196,9 +220,14 @@ export default function ManagerWeeklyRoster() {
         if (newStart >= newEnd) throw new Error("Shift start time must be before end time.");
         
         if (branchData.branch_operating_hours) {
-          const [branchStartStr, branchEndStr] = branchData.branch_operating_hours.split('-');
-          if (newStart < timeToMins(branchStartStr) || newEnd > timeToMins(branchEndStr)) {
-            throw new Error("Selected time is outside branch operating hours.");
+          const timeParts = branchData.branch_operating_hours.split(': ');
+          if (timeParts.length >= 2) {
+             const [branchStartStr, branchEndStr] = timeParts[1].split(' - ');
+             if (branchStartStr && branchEndStr) {
+               if (newStart < timeToMins(branchStartStr) || newEnd > timeToMins(branchEndStr)) {
+                 throw new Error(`Selected time is outside branch operating hours (${timeParts[1]}).`);
+               }
+             }
           }
         }
       }
@@ -208,10 +237,11 @@ export default function ManagerWeeklyRoster() {
 
       if (isWork && repeatCount > 0) {
         datesToProcess = [];
+        const [y, m, d] = formData.startDate.split('-').map(Number);
         for (let i = 0; i <= repeatCount; i++) {
-          const d = new Date(formData.startDate);
-          d.setDate(d.getDate() + (i * 7));
-          datesToProcess.push(getLocalISODate(d));
+          const dObj = new Date(y, m - 1, d);
+          dObj.setDate(dObj.getDate() + (i * 7));
+          datesToProcess.push(getLocalISODate(dObj));
         }
       }
 
@@ -224,19 +254,34 @@ export default function ManagerWeeklyRoster() {
         .lte('shift_date', lastDateStr);
 
       const existingShifts = futureShifts || [];
+      const ghostShiftIds: number[] = [];
 
       for (const targetDate of datesToProcess) {
         const dayShifts = existingShifts.filter(s => s.shift_date === targetDate && s.id !== editingShiftId);
+        
         for (let shift of dayShifts) {
+          
+          // --- GHOST SHIFT CLEANUP ---
+          // If the shift belongs to another branch, it's leftover data from before the nurse was transferred.
+          if (Number(shift.branch_id) !== Number(branchData.id)) {
+            ghostShiftIds.push(shift.id); // Tag it for deletion
+            continue; // Skip the conflict check so you can schedule them
+          }
+
           if (!isWork || shift.shift_type !== 'WORK') {
              throw new Error(`Conflict on ${targetDate}: Nurse already has an assignment/leave.`);
           }
           const existStart = timeToMins(shift.start_time);
           const existEnd = timeToMins(shift.end_time);
           if (newStart < existEnd && newEnd > existStart) {
-            throw new Error(`Conflict on ${targetDate}: Overlapping time slots.`);
+            throw new Error(`Conflict on ${targetDate}: Overlapping with shift (${shift.start_time?.slice(0,5)} - ${shift.end_time?.slice(0,5)}).`);
           }
         }
+      }
+
+      // Delete the leftover shifts from the previous branch before saving yours
+      if (ghostShiftIds.length > 0) {
+         await supabase.from('staff_roster').delete().in('id', ghostShiftIds);
       }
 
       const payload = datesToProcess.map(dateStr => ({
@@ -248,7 +293,7 @@ export default function ManagerWeeklyRoster() {
         end_time: isWork ? formData.end_time : null,
         shift_role: isWork ? formData.shift_role : null,
         zone_assignment: isWork ? formData.zone_assignment : null,
-        break_minutes: isWork ? parseInt(formData.break_minutes) : 0
+        break_minutes: isWork ? parseInt(formData.break_minutes || '0') : 0
       }));
 
       if (modalMode === 'add') {
@@ -261,12 +306,12 @@ export default function ManagerWeeklyRoster() {
           end_time: isWork ? formData.end_time : null,
           shift_role: isWork ? formData.shift_role : null,
           zone_assignment: isWork ? formData.zone_assignment : null,
-          break_minutes: isWork ? parseInt(formData.break_minutes) : 0
+          break_minutes: isWork ? parseInt(formData.break_minutes || '0') : 0,
+          branch_id: branchData.id 
         }).eq('id', editingShiftId);
         if (error) throw error;
       }
 
-      const nurseDetails = nurses.find(n => n.user_id === nurseId);
       const actionType = modalMode === 'add' ? 'Assigned to' : 'Updated';
       const notifMsg = isWork 
         ? `You have been ${actionType} a ${formData.shift_role} shift on ${formData.startDate} (${formData.start_time} - ${formData.end_time}).`
@@ -294,7 +339,6 @@ export default function ManagerWeeklyRoster() {
   const prevMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() - 1); setCurrentMonth(d); };
   const nextMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() + 1); setCurrentMonth(d); };
 
-  // FIX: Properly typed days array for TypeScript
   const getMonthDays = () => {
     const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
@@ -325,10 +369,15 @@ export default function ManagerWeeklyRoster() {
     setCurrentWeekStart(getMonday(date));
     setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
   };
-
-  if (isLoading && !branchData) return <div className='p-8 text-center text-slate-500 mt-20'>Loading Duty Roster Engine...</div>;
-
-  const getShiftStyles = (type: string) => {
+if (isLoading && !branchData) {
+    return (
+      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
+        <div className='flex flex-col items-center text-blue-600 font-bold'><FiActivity className='text-4xl mb-4 animate-spin' /><span>Loading Duty Roster...</span></div>
+      </div>
+    );
+  }
+  const getShiftStyles = (type: string, isForeignBranch: boolean = false) => {
+    if (isForeignBranch) return 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300';
     switch(type) {
       case 'ANNUAL_LEAVE': return 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300';
       case 'MEDICAL_LEAVE': return 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 hover:border-rose-300';
@@ -402,7 +451,8 @@ export default function ManagerWeeklyRoster() {
                 </th>
                 {weekDays.map((date, i) => {
                   const dateStr = getLocalISODate(date);
-                  const workingNursesToday = weeklyRoster.filter(s => s.shift_date === dateStr && s.shift_type === 'WORK').length;
+                  // Safety capacity only counts shifts mapped to this specific branch
+                  const workingNursesToday = weeklyRoster.filter(s => s.shift_date === dateStr && s.shift_type === 'WORK' && s.branch_id === branchData?.id).length;
                   const safeCapacity = workingNursesToday * PATIENTS_PER_NURSE;
 
                   return (
@@ -451,15 +501,19 @@ export default function ManagerWeeklyRoster() {
                     {weekDays.map((date, i) => {
                       const dateStr = getLocalISODate(date);
                       const shift = nurseShifts.find(s => s.shift_date === dateStr);
+                      const isForeignBranch = shift && shift.branch_id !== branchData?.id;
+                      
                       return (
                         <td key={i} className='p-2 border-r border-slate-100 last:border-0 align-top h-28 min-w-[120px] relative group/cell'>
                           {shift ? (
-                            <div onClick={() => handleShiftBlockClick(shift)} className={`h-full w-full border rounded-lg p-2 cursor-pointer transition-colors flex flex-col justify-center items-center text-center group-hover/cell:shadow-sm ${getShiftStyles(shift.shift_type)}`}>
+                            <div onClick={() => handleShiftBlockClick(shift)} className={`h-full w-full border rounded-lg p-2 cursor-pointer transition-colors flex flex-col justify-center items-center text-center group-hover/cell:shadow-sm ${getShiftStyles(shift.shift_type, isForeignBranch)}`}>
                               <span className='text-xs font-black'>
                                 {shift.shift_type === 'WORK' ? `${shift.start_time.slice(0, 5)} - ${shift.end_time.slice(0, 5)}` : shift.shift_type.replace('_', ' ')}
                               </span>
                               {shift.shift_type === 'WORK' && (
-                                <span className='text-[9px] font-medium opacity-80 mt-1 line-clamp-1'>{shift.shift_role}</span>
+                                <span className='text-[9px] font-medium opacity-80 mt-1 line-clamp-1'>
+                                  {isForeignBranch ? 'Other Branch' : shift.shift_role}
+                                </span>
                               )}
                               <span className='text-[10px] font-bold uppercase tracking-widest mt-1 opacity-0 group-hover/cell:opacity-100 transition-opacity'>Edit</span>
                             </div>
@@ -517,7 +571,7 @@ export default function ManagerWeeklyRoster() {
                 <div className='grid grid-cols-2 gap-4 items-center animate-in slide-in-from-top-2'>
                   <div>
                     <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Start Date</label>
-                    <input type="date" required disabled={modalMode === 'edit'} value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value, endDate: new Date(formData.endDate) < new Date(e.target.value) ? e.target.value : formData.endDate})} className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-800 disabled:opacity-70' />
+                    <input type="date" required disabled={modalMode === 'edit'} value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value, endDate: formData.endDate < e.target.value ? e.target.value : formData.endDate})} className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-800 disabled:opacity-70' />
                   </div>
                   <div>
                     <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>End Date</label>
@@ -568,9 +622,9 @@ export default function ManagerWeeklyRoster() {
                   <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Repeat Assignment</label>
                   <select value={formData.repeatWeeks} onChange={e => setFormData({...formData, repeatWeeks: e.target.value})} className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-800'>
                     <option value="0">Does not repeat</option>
-                    <option value="1">Weekly on {new Date(formData.startDate).toLocaleDateString('en-MY', { weekday: 'long' })} (2 times total)</option>
-                    <option value="2">Weekly on {new Date(formData.startDate).toLocaleDateString('en-MY', { weekday: 'long' })} (3 times total)</option>
-                    <option value="3">Weekly on {new Date(formData.startDate).toLocaleDateString('en-MY', { weekday: 'long' })} (1 month total)</option>
+                    <option value="1">Weekly on {getLocalDisplayDay(formData.startDate)} (2 times total)</option>
+                    <option value="2">Weekly on {getLocalDisplayDay(formData.startDate)} (3 times total)</option>
+                    <option value="3">Weekly on {getLocalDisplayDay(formData.startDate)} (1 month total)</option>
                   </select>
                 </div>
               )}

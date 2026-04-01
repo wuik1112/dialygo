@@ -806,7 +806,14 @@ export default function PatientSearchBooking() {
       {/* ========================================= */}
       {/* VIEW 3: REVIEW & CONFIRM OVERLAY */}
       {/* ========================================= */}
-      {showReviewScreen && (
+{/* ========================================= */}
+      {/* VIEW 3: REVIEW & CONFIRM OVERLAY */}
+      {/* ========================================= */}
+      {/* FIX: We added '&& selectedBranch' here. 
+          This is a "safety guard" that prevents the screen from trying to 
+          load if the branch data accidentally goes missing.
+      */}
+      {showReviewScreen && selectedBranch && (
         <div className='flex flex-col h-full w-full bg-slate-50 animate-in slide-in-from-right-8 duration-300 z-30 absolute inset-0'>
           <div className='bg-white px-5 pt-12 pb-4 shadow-sm flex items-center justify-between shrink-0 border-b border-slate-100'>
             <button onClick={() => setShowReviewScreen(false)} className='p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full flex items-center gap-1 font-bold text-sm transition-colors'>
@@ -820,8 +827,9 @@ export default function PatientSearchBooking() {
             
             <div className='bg-white p-5 rounded-2xl shadow-sm border border-slate-100'>
               <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1'>Target Clinic</p>
-              <h2 className='text-lg font-black text-slate-800'>{selectedBranch.branch_name}</h2>
-              <p className='text-xs font-bold text-slate-500 mt-1 flex items-center gap-1'><FiMapPin /> {selectedBranch.branch_address}</p>
+              {/* Added ?. just in case of a split-second race condition */}
+              <h2 className='text-lg font-black text-slate-800'>{selectedBranch?.branch_name}</h2>
+              <p className='text-xs font-bold text-slate-500 mt-1 flex items-center gap-1'><FiMapPin /> {selectedBranch?.branch_address}</p>
             </div>
 
             <div className='bg-white p-5 rounded-2xl shadow-sm border border-slate-100'>
@@ -836,7 +844,7 @@ export default function PatientSearchBooking() {
                         <p className='text-[10px] font-bold text-slate-500 uppercase'>{s.shift.split('(')[0]}</p>
                       </div>
                     </div>
-                    {selectedBranch.session_price && <p className='text-sm font-bold text-slate-600'>RM {selectedBranch.session_price}</p>}
+                    {selectedBranch?.session_price && <p className='text-sm font-bold text-slate-600'>RM {selectedBranch.session_price}</p>}
                   </div>
                 ))}
               </div>
@@ -845,7 +853,7 @@ export default function PatientSearchBooking() {
             <div className='bg-blue-600 text-white p-6 rounded-2xl shadow-md'>
               <div className='flex justify-between items-center border-b border-blue-500 pb-4 mb-4'>
                 <p className='text-sm font-bold text-blue-100'>Total Estimated Cost</p>
-                <p className='text-2xl font-black'>{selectedBranch.session_price ? `RM ${selectedBranch.session_price * selectedSessions.length}` : 'TBC'}</p>
+                <p className='text-2xl font-black'>{selectedBranch?.session_price ? `RM ${selectedBranch.session_price * selectedSessions.length}` : 'TBC'}</p>
               </div>
               <p className='text-[10px] font-medium text-blue-200 leading-relaxed text-justify'>
                 *This is an estimate. Final billing will be handled directly by the clinic. Payment can be made via Cash, Panel, or Guarantee Letter (GL) upon arrival at the center.
