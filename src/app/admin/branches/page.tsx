@@ -51,12 +51,37 @@ export default function BranchManagement() {
 
   async function fetchData() {
     setIsLoading(true);
-    const { data: branchData } = await supabase.from('branches').select('*').order('id', { ascending: true });
-    if (branchData) setBranches(branchData);
-
-    const { data: managerData } = await supabase.from('users').select('*').eq('role_id', 2);
-    if (managerData) setManagers(managerData);
     
+    // FETCH LIVE REAL-TIME DATA TO CALCULATE TRUE CAPACITY
+    const [branchRes, managerRes, machinesRes, patientsRes] = await Promise.all([
+      supabase.from('branches').select('*').order('id', { ascending: true }),
+      supabase.from('users').select('*').eq('role_id', 2),
+      supabase.from('machines').select('branch_id').neq('status', 'Retired'),
+      supabase.from('patients').select('home_branch_id')
+    ]);
+
+    if (branchRes.data) {
+      // CALCULATE REAL UTILIZATION METRICS
+      const enrichedBranches = branchRes.data.map(branch => {
+        const actualMachines = machinesRes.data?.filter(m => m.branch_id === branch.id).length || 0;
+        const activePatients = patientsRes.data?.filter(p => p.home_branch_id === branch.id).length || 0;
+        
+        // Dialysis standard capacity: 1 machine handles 6 patients (3 shifts/day, MWF/TTS)
+        const totalCapacity = actualMachines * 6; 
+        const availableSlots = Math.max(0, totalCapacity - activePatients);
+
+        return {
+          ...branch,
+          actual_machines: actualMachines,
+          active_patients: activePatients,
+          total_capacity: totalCapacity,
+          available_slots_calc: availableSlots
+        };
+      });
+      setBranches(enrichedBranches);
+    }
+    
+    if (managerRes.data) setManagers(managerRes.data);
     setIsLoading(false);
   }
 
@@ -265,14 +290,10 @@ export default function BranchManagement() {
         return;
       }
 
-      // --- NEW TWO-WAY SYNC LOGIC FOR EDIT ---
-      // If the manager has changed, update the users table to reflect the new assignments
       if (selectedBranch.manager_id !== newManagerId) {
-        // Clear branch assignment from the old manager
         if (selectedBranch.manager_id) {
           await supabase.from('users').update({ branch_id: null }).eq('user_id', selectedBranch.manager_id);
         }
-        // Assign the branch to the new manager
         if (newManagerId) {
           await supabase.from('users').update({ branch_id: editingId }).eq('user_id', newManagerId);
         }
@@ -283,7 +304,6 @@ export default function BranchManagement() {
       payload.available_slots = 0;
       payload.status = 'Active';
 
-      // We added .select() here to guarantee Supabase returns the newly created branch ID
       const { data: newBranchData, error: insertError } = await supabase.from('branches').insert([payload]).select();
       
       if (insertError) {
@@ -296,8 +316,6 @@ export default function BranchManagement() {
         return;
       }
 
-      // --- NEW TWO-WAY SYNC LOGIC FOR ADD ---
-      // Apply the newly generated branch ID to the selected manager's profile
       if (newManagerId && newBranchData && newBranchData.length > 0) {
         const generatedBranchId = newBranchData[0].id;
         await supabase.from('users').update({ branch_id: generatedBranchId }).eq('user_id', newManagerId);
@@ -366,8 +384,8 @@ export default function BranchManagement() {
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
           {filteredBranches.map(branch => {
             const isActive = branch.status === 'Active';
-            const usedMachines = branch.total_machines - branch.available_slots;
-            const utilizationPercent = branch.total_machines > 0 ? (usedMachines / branch.total_machines) * 100 : 0;
+            // NEW METRICS DRIVEN FROM REAL DATABASE QUERIES
+            const utilizationPercent = branch.total_capacity > 0 ? (branch.active_patients / branch.total_capacity) * 100 : 0;
 
             return (
               <div key={branch.id} className={`bg-white p-6 rounded-2xl border ${isActive ? 'border-slate-200' : 'border-red-100 bg-red-50/20'} shadow-sm flex flex-col hover:shadow-md transition-shadow`}>
@@ -386,8 +404,8 @@ export default function BranchManagement() {
                   
                   <div>
                     <div className='flex justify-between items-end mb-1.5'>
-                      <span className='text-[11px] font-bold text-slate-400 uppercase tracking-tighter'>Machine Utilization</span>
-                      <span className='text-[11px] font-black text-slate-700'>{usedMachines} / {branch.total_machines}</span>
+                      <span className='text-[11px] font-bold text-slate-400 uppercase tracking-tighter'>Capacity Utilization</span>
+                      <span className='text-[11px] font-black text-slate-700'>{branch.active_patients} / {branch.total_capacity} Patients</span>
                     </div>
                     <div className='w-full bg-slate-100 rounded-full h-2 overflow-hidden'>
                       <div 
@@ -468,12 +486,12 @@ export default function BranchManagement() {
                       
                       <div className='grid grid-cols-2 gap-4 mb-4'>
                         <div className='bg-white p-3 rounded-xl border border-slate-100 shadow-sm'>
-                          <p className='text-[10px] font-bold text-slate-400 uppercase'>Total Machines</p>
-                          <p className='text-lg font-black text-slate-800'>{selectedBranch.total_machines}</p>
+                          <p className='text-[10px] font-bold text-slate-400 uppercase'>Active Machines</p>
+                          <p className='text-lg font-black text-slate-800'>{selectedBranch.actual_machines}</p>
                         </div>
                         <div className='bg-white p-3 rounded-xl border border-slate-100 shadow-sm'>
                           <p className='text-[10px] font-bold text-slate-400 uppercase'>Available Slots</p>
-                          <p className='text-lg font-black text-emerald-600'>{selectedBranch.available_slots}</p>
+                          <p className='text-lg font-black text-emerald-600'>{selectedBranch.available_slots_calc}</p>
                         </div>
                       </div>
 
