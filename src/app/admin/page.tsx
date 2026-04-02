@@ -153,7 +153,6 @@ export default function AdminDashboard() {
         
         <header className='mb-10'>
           <h1 className='text-3xl font-black text-slate-900'>Network Dashboard</h1>
-          <p className='text-slate-500 font-medium'>Live Capacity & Patient Mobility</p>
         </header>
 
         {/* Global KPIs */}
