@@ -7,7 +7,7 @@ import {
   FiClock, FiAlertTriangle, FiCheckCircle, 
   FiChevronRight, FiMapPin, FiCalendar, FiShield,
   FiUser, FiEdit2, FiDroplet, FiX, FiSearch,
-  FiMap, FiHome
+  FiMap, FiHome, FiArrowUp, FiArrowDown
 } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
@@ -24,7 +24,12 @@ export default function ManagerDashboard() {
   const [managerName, setManagerName] = useState('');
   
   const [timeFilter, setTimeFilter] = useState<'Today' | 'Week' | 'Month' | 'Year'>('Week');
+  
+  // --- SEARCH, FILTER & SORT STATES ---
   const [patientSearch, setPatientSearch] = useState('');
+  const [filterInfection, setFilterInfection] = useState<'All' | 'Standard' | 'Isolation'>('All');
+  const [filterSchedule, setFilterSchedule] = useState<'All' | 'MWF' | 'TTS' | 'Unassigned'>('All');
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
 
   const [dbBookings, setDbBookings] = useState<any[]>([]);
   const [branchPatients, setBranchPatients] = useState<any[]>([]);
@@ -238,6 +243,72 @@ export default function ManagerDashboard() {
     } catch (error: any) { alert(`Error updating patient: ${error.message}`); } finally { setIsSaving(false); }
   };
 
+  // --- FILTERING & SORTING LOGIC ---
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const processedPatients = useMemo(() => {
+    let result = [...branchPatients];
+
+    // 1. Apply Search
+    if (patientSearch) {
+      const term = patientSearch.toLowerCase();
+      result = result.filter(p => 
+        p.users?.user_fullname.toLowerCase().includes(term) || 
+        p.users?.user_ic.includes(term)
+      );
+    }
+
+    // 2. Apply Infection Status Filter
+    if (filterInfection !== 'All') {
+      result = result.filter(p => {
+        const isInfectious = p.hepatitis_b_status === 'Positive' || p.hepatitis_c_status === 'Positive' || p.hiv_status === 'Positive';
+        return filterInfection === 'Isolation' ? isInfectious : !isInfectious;
+      });
+    }
+
+    // 3. Apply Schedule Pattern Filter
+    if (filterSchedule !== 'All') {
+      result = result.filter(p => {
+        if (filterSchedule === 'Unassigned') return !p.schedule_pattern;
+        return p.schedule_pattern === filterSchedule;
+      });
+    }
+
+    // 4. Apply Sorting
+    result.sort((a, b) => {
+      if (sortConfig.key === 'name') {
+        const nameA = a.users?.user_fullname || '';
+        const nameB = b.users?.user_fullname || '';
+        return sortConfig.direction === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      }
+      if (sortConfig.key === 'schedule') {
+        const schA = a.schedule_pattern || 'zzz'; 
+        const schB = b.schedule_pattern || 'zzz';
+        return sortConfig.direction === 'asc' ? schA.localeCompare(schB) : schB.localeCompare(schA);
+      }
+      if (sortConfig.key === 'machine') {
+        const machA = a.assigned_machine?.serial_number || 'zzz'; 
+        const machB = b.assigned_machine?.serial_number || 'zzz';
+        return sortConfig.direction === 'asc' ? machA.localeCompare(machB) : machB.localeCompare(machA);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [branchPatients, patientSearch, filterInfection, filterSchedule, sortConfig]);
+
+  const SortIndicator = ({ columnKey }: { columnKey: string }) => {
+    if (sortConfig.key !== columnKey) return <span className="text-slate-300 ml-1 opacity-40">↕</span>;
+    return sortConfig.direction === 'asc' 
+      ? <FiArrowUp className="inline text-indigo-500 ml-1" /> 
+      : <FiArrowDown className="inline text-indigo-500 ml-1" />;
+  };
+
   // Add this block before the loading check
   if (error) {
     return (
@@ -306,8 +377,6 @@ export default function ManagerDashboard() {
       </div>
     );
   };
-
-  const filteredPatients = branchPatients.filter(p => p.users?.user_fullname.toLowerCase().includes(patientSearch.toLowerCase()) || p.users?.user_ic.includes(patientSearch));
 
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans pb-24'>
@@ -418,9 +487,38 @@ export default function ManagerDashboard() {
             <div>
               <h2 className='text-lg font-black text-slate-800 flex items-center gap-2'><FiUsers className='text-indigo-500'/> Patient Logistics Directory</h2>
             </div>
-            <div className='relative w-full md:w-72'>
-              <FiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg' />
-              <input type="text" placeholder="Search patient name or IC..." value={patientSearch} onChange={e => setPatientSearch(e.target.value)} className='w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium transition-colors shadow-sm' />
+            
+            {/* --- NEW FILTER & SEARCH CONTROLS --- */}
+            <div className='flex flex-col md:flex-row gap-3 w-full md:w-auto'>
+              <select 
+                value={filterInfection} 
+                onChange={e => setFilterInfection(e.target.value as any)} 
+                className='p-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium text-slate-600 shadow-sm'
+              >
+                <option value="All">All Statuses</option>
+                <option value="Standard">Standard</option>
+                <option value="Isolation">Isolation</option>
+              </select>
+              <select 
+                value={filterSchedule} 
+                onChange={e => setFilterSchedule(e.target.value as any)} 
+                className='p-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium text-slate-600 shadow-sm'
+              >
+                <option value="All">All Schedules</option>
+                <option value="MWF">MWF</option>
+                <option value="TTS">TTS</option>
+                <option value="Unassigned">Unassigned</option>
+              </select>
+              <div className='relative w-full md:w-64'>
+                <FiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg' />
+                <input 
+                  type="text" 
+                  placeholder="Search name or IC..." 
+                  value={patientSearch} 
+                  onChange={e => setPatientSearch(e.target.value)} 
+                  className='w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm font-medium transition-colors shadow-sm' 
+                />
+              </div>
             </div>
           </div>
 
@@ -428,18 +526,29 @@ export default function ManagerDashboard() {
             <table className='w-full text-left border-collapse'>
               <thead>
                 <tr className='bg-white border-b border-slate-200'>
-                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Patient Identity</th>
-                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Infection Status</th>
-                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Schedule Pattern</th>
-                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>Dedicated Machine</th>
-                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest text-right'>Actions</th>
+                  {/* --- UPDATED CLICKABLE TABLE HEADERS FOR SORTING --- */}
+                  <th onClick={() => handleSort('name')} className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-indigo-500 transition-colors select-none'>
+                    Patient Identity <SortIndicator columnKey="name" />
+                  </th>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest'>
+                    Infection Status
+                  </th>
+                  <th onClick={() => handleSort('schedule')} className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-indigo-500 transition-colors select-none'>
+                    Schedule Pattern <SortIndicator columnKey="schedule" />
+                  </th>
+                  <th onClick={() => handleSort('machine')} className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-indigo-500 transition-colors select-none'>
+                    Dedicated Machine <SortIndicator columnKey="machine" />
+                  </th>
+                  <th className='p-4 text-xs font-black text-slate-400 uppercase tracking-widest text-right'>
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100'>
-                {filteredPatients.length === 0 ? (
-                  <tr><td colSpan={5} className='p-8 text-center text-slate-500 font-medium'>No patients match your search.</td></tr>
+                {processedPatients.length === 0 ? (
+                  <tr><td colSpan={5} className='p-8 text-center text-slate-500 font-medium'>No patients match your filters/search.</td></tr>
                 ) : (
-                  filteredPatients.map(patient => {
+                  processedPatients.map(patient => {
                     const isInfectious = patient.hepatitis_b_status === 'Positive' || patient.hepatitis_c_status === 'Positive' || patient.hiv_status === 'Positive';
                     const assignedMachine = patient.assigned_machine;
 
