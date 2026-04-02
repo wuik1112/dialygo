@@ -642,9 +642,9 @@ export default function PatientSearchBooking() {
               <p className='text-sm text-slate-500 mt-2 leading-relaxed'>{selectedBranch.branch_address}</p>
               
               <div className='flex justify-between items-center mt-2'>
-                <button type="button" onClick={() => window.open(`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(selectedBranch.branch_name + ' ' + selectedBranch.branch_address)}`, '_blank')} className='text-blue-600 text-sm font-bold flex items-center gap-1 hover:text-blue-800 transition-colors'>
-                  <FiMapPin /> View map
-                </button>
+                <button type="button" onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(selectedBranch.branch_name + ' ' + selectedBranch.branch_address)}`, '_blank')} className='text-blue-600 text-sm font-bold flex items-center gap-1 hover:text-blue-800 transition-colors'>
+  <FiMapPin /> View map
+</button>
                 {selectedBranch.distanceText && selectedBranch.distanceText !== 'N/A' && (
                   <span className='text-xs font-bold text-slate-400'>{selectedBranch.durationText} drive ({selectedBranch.distanceText})</span>
                 )}
