@@ -2,94 +2,97 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { 
-  FiSearch, FiEdit2, FiSave, FiX, FiActivity, 
-  FiDroplet, FiFileText, FiUploadCloud, FiLoader, FiCheckCircle 
+  FiSearch, FiEdit2, FiSave, FiX, FiActivity, FiDroplet, 
+  FiFileText, FiUploadCloud, FiTrendingUp, FiShield, FiClipboard,
+  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter
 } from 'react-icons/fi';
 
-export default function PrescriptionManagement() {
+export default function ClinicalPatientRecord() {
+  const [activeTab, setActiveTab] = useState<'rx' | 'clinical' | 'history'>('rx');
   const [patients, setPatients] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [nephrologistId, setNephrologistId] = useState<number | null>(null);
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [prescriptionForm, setPrescriptionForm] = useState({
+  // Form State
+  const [rxForm, setRxForm] = useState({
+    session_frequency: '3',
+    target_duration: '240',
+    blood_flow_rate: '300',
+    dialysate_flow_rate: '500',
+    dialyser_type: '',
+    target_ktv: '1.2',
     target_dry_weight: '',
-    target_duration: '',
-    heparin_dosage: '',
     treatment_modality: 'HD',
-    is_heparin_free: false
+    dialysate_sodium: '138',
+    dialysate_potassium: '2.0',
+    dialysate_calcium: '1.25',
+    dialysate_bicarbonate: '32',
+    dialysate_temp: '36.5',
+    anticoagulation_profile: 'Standard Heparin',
+    heparin_dosage: '',
+    nursing_instructions: ''
   });
 
-  const fetchData = async () => {
+  const fetchClinicalData = async () => {
+    setIsLoading(true);
     const { data: session } = await supabase.auth.getSession();
-    if (!session.session) return;
-
-    const { data: user } = await supabase.from('users').select('user_id, branch_id').eq('user_email', session.session.user.email).single();
-    if (!user) return;
+    if (!session?.session) return;
+    
+    const { data: user, error: userError } = await supabase.from('users').select('user_id, branch_id').eq('user_email', session.session.user.email).single();
+    if (userError || !user) {
+      setIsLoading(false);
+      return;
+    }
     
     setNephrologistId(user.user_id);
 
-    // Fetch Home Patients
     const { data: homePatients } = await supabase
       .from('patients')
       .select(`
         *,
-        users!inner(user_fullname, user_ic, user_gender),
-        prescriptions(*)
+        users!inner(user_fullname, user_ic, user_date_of_birth),
+        prescriptions(*),
+        treatments(session_date, session_status, fluid_removed, session_complications)
       `)
       .eq('home_branch_id', user.branch_id);
 
-    // Fetch Traveling Patients for today
-    const today = new Date().toISOString().split('T')[0];
-    const { data: visitingBookings } = await supabase
-      .from('bookings')
-      .select(`
-        patient_id,
-        patients (
-          *,
-          users!inner(user_fullname, user_ic, user_gender),
-          prescriptions(*)
-        )
-      `)
-      .eq('branch_id', user.branch_id)
-      .eq('booking_date', today);
-
-    let combinedPatients = [...(homePatients || [])];
-    if (visitingBookings) {
-      visitingBookings.forEach((booking: any) => {
-        const isDuplicate = combinedPatients.some(p => p.patient_id === booking.patients?.patient_id);
-        if (!isDuplicate && booking.patients) {
-          combinedPatients.push({ ...booking.patients, is_traveler: true });
-        }
-      });
-    }
-    setPatients(combinedPatients);
+    setPatients(homePatients || []);
     setIsLoading(false);
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchClinicalData(); }, []);
 
   const handleSelectPatient = (patient: any) => {
     setSelectedPatient(patient);
     setIsEditing(false);
-    const rx = patient.prescriptions?.find((p: any) => p.status === 'Active') || null;
+    const rx = patient.prescriptions?.find((p: any) => p.status === 'Active');
     if (rx) {
-      setPrescriptionForm({
+      setRxForm({
+        session_frequency: rx.session_frequency?.toString() || '3',
+        target_duration: rx.target_duration?.toString() || '240',
+        blood_flow_rate: rx.blood_flow_rate?.toString() || '300',
+        dialysate_flow_rate: rx.dialysate_flow_rate?.toString() || '500',
+        dialyser_type: rx.dialyser_type || '',
+        target_ktv: rx.target_ktv?.toString() || '1.2',
         target_dry_weight: rx.target_dry_weight?.toString() || '',
-        target_duration: rx.target_duration?.toString() || '',
-        heparin_dosage: rx.heparin_dosage?.toString() || '',
         treatment_modality: rx.treatment_modality || 'HD',
-        is_heparin_free: rx.is_heparin_free || false
+        dialysate_sodium: rx.dialysate_sodium?.toString() || '138',
+        dialysate_potassium: rx.dialysate_potassium?.toString() || '2.0',
+        dialysate_calcium: rx.dialysate_calcium?.toString() || '1.25',
+        dialysate_bicarbonate: rx.dialysate_bicarbonate?.toString() || '32',
+        dialysate_temp: rx.dialysate_temp?.toString() || '36.5',
+        anticoagulation_profile: rx.anticoagulation_profile || 'Standard Heparin',
+        heparin_dosage: rx.heparin_dosage?.toString() || '',
+        nursing_instructions: rx.nursing_instructions || '',
       });
     } else {
-      setPrescriptionForm({ target_dry_weight: '', target_duration: '240', heparin_dosage: '', treatment_modality: 'HD', is_heparin_free: false });
+      // Clear form if no active Rx
+      setRxForm({ ...rxForm, target_dry_weight: '' }); 
     }
   };
 
@@ -104,18 +107,11 @@ export default function PrescriptionManagement() {
       const fileName = `serology_${selectedPatient.patient_id}_${Date.now()}.${fileExt}`;
       const filePath = `${selectedPatient.patient_id}/${fileName}`;
 
-      // CRITICAL: Updated to use 'patient_documents' bucket
-      const { error: uploadError } = await supabase.storage
-        .from('patient_documents')
-        .upload(filePath, file);
-
+      const { error: uploadError } = await supabase.storage.from('patient_documents').upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('patient_documents')
-        .getPublicUrl(filePath);
+      const { data: { publicUrl } } = supabase.storage.from('patient_documents').getPublicUrl(filePath);
 
-      // Update patient record with new document link
       const { error: updateError } = await supabase
         .from('patients')
         .update({ 
@@ -128,7 +124,7 @@ export default function PrescriptionManagement() {
       if (updateError) throw updateError;
 
       alert("Serology report uploaded to patient_documents successfully!");
-      fetchData(); // Refresh list to update UI
+      fetchClinicalData();
       setSelectedPatient({...selectedPatient, serology_report_url: publicUrl});
     } catch (err: any) {
       alert("Upload failed: " + err.message);
@@ -143,11 +139,8 @@ export default function PrescriptionManagement() {
     const payload = {
       patient_id: selectedPatient.patient_id,
       nephrologist_id: nephrologistId,
-      target_dry_weight: parseFloat(prescriptionForm.target_dry_weight),
-      target_duration: parseInt(prescriptionForm.target_duration),
-      heparin_dosage: prescriptionForm.is_heparin_free ? 0 : parseFloat(prescriptionForm.heparin_dosage),
-      treatment_modality: prescriptionForm.treatment_modality,
-      is_heparin_free: prescriptionForm.is_heparin_free,
+      ...rxForm,
+      target_dry_weight: parseFloat(rxForm.target_dry_weight),
       updated_at: new Date().toISOString(),
       status: 'Active' 
     };
@@ -160,148 +153,321 @@ export default function PrescriptionManagement() {
     const { error } = await supabase.from('prescriptions').insert([payload]);
 
     if (!error) {
-      alert("Prescription officially signed and saved.");
+      alert("Prescription officially signed and versioned in audit log.");
       setIsEditing(false);
-      fetchData();
+      fetchClinicalData();
     } else {
       alert("Clinical Error: " + error.message);
     }
   };
 
-  const filteredPatients = patients.filter(p => p.users.user_fullname.toLowerCase().includes(search.toLowerCase()));
+  // PDF Print Function
+  const handlePrint = () => {
+    window.print();
+  };
 
-  // Requirement: Unified Loading Screen
-  if (isLoading) {
-    return (
-      <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
-        <div className='flex flex-col items-center text-blue-600 font-bold'>
-          <FiActivity className='text-4xl mb-4 animate-spin' />
-          <span>Loading Patient Directory...</span>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <div className="p-8">Loading Clinical Workstation...</div>;
 
   return (
-    <main className="p-4 sm:p-8 max-w-7xl mx-auto flex gap-6 h-[calc(100vh-4rem)]">
-      {/* SIDEBAR DIRECTORY */}
-      <div className="w-1/3 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-slate-100 bg-slate-50">
-          <div className="relative">
-            <FiSearch className="absolute left-3 top-3.5 text-slate-400" />
-            <input type="text" placeholder="Filter clinical records..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-500 outline-none" />
-          </div>
+    <main className="p-8 max-w-[1600px] mx-auto flex gap-8 h-[calc(100vh-2rem)] print:p-0 print:m-0 print:h-auto">
+      
+      {/* DIRECTORY SIDEBAR (Hidden when printing) */}
+      <div className="w-1/4 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden print:hidden">
+        <div className="p-5 border-b border-slate-100 bg-slate-50">
+          <h3 className="font-black text-slate-900 text-sm uppercase tracking-tighter">Clinical Directory</h3>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {filteredPatients.map(p => (
-            <button key={p.patient_id} onClick={() => handleSelectPatient(p)} className={`w-full text-left p-4 rounded-xl mb-2 transition-all ${selectedPatient?.patient_id === p.patient_id ? 'bg-blue-50 border-blue-200 border' : 'hover:bg-slate-50 border border-transparent'}`}>
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="font-bold text-slate-900">{p.users.user_fullname}</p>
-                  <p className="text-[10px] text-slate-400 mt-1 uppercase font-black tracking-widest">{p.users.user_ic}</p>
-                </div>
-                {p.is_traveler && <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-1 rounded">TRAVEL</span>}
-              </div>
+          {patients.map(p => (
+            <button key={p.patient_id} onClick={() => handleSelectPatient(p)} className={`w-full text-left p-4 rounded-2xl mb-2 transition-all ${selectedPatient?.patient_id === p.patient_id ? 'bg-blue-900 text-white shadow-lg' : 'hover:bg-slate-50'}`}>
+              <p className="font-bold leading-tight">{p.users.user_fullname}</p>
+              <p className={`text-[10px] font-black uppercase mt-1 ${selectedPatient?.patient_id === p.patient_id ? 'text-blue-300' : 'text-slate-400'}`}>IC: {p.users.user_ic}</p>
             </button>
           ))}
         </div>
       </div>
 
-      {/* CLINICAL WORKSTATION */}
-      <div className="w-2/3 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden">
+      {/* WORKSTATION AREA (Expands to full width when printing) */}
+      <div className="w-3/4 flex flex-col gap-6 print:w-full print:block">
         {selectedPatient ? (
           <>
-            <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50">
-              <div className="flex-1">
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">{selectedPatient.users.user_fullname}</h2>
-                <div className="flex items-center mt-2 text-sm text-slate-600 font-medium gap-4">
-                  <span className="flex items-center gap-1"><FiDroplet className="text-red-500" /> {selectedPatient.patient_blood_type}</span>
-                  <span className="flex items-center gap-1"><FiActivity className="text-amber-500" /> Hep B: {selectedPatient.hepatitis_b_status}</span>
+            {/* CORE IDENTIFICATION */}
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm print:border-black print:rounded-none print:shadow-none">
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-3xl font-black print:hidden">
+                    {selectedPatient.users.user_fullname[0]}
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-900 print:text-black">{selectedPatient.users.user_fullname}</h2>
+                    <div className="flex gap-4 mt-1 text-xs font-bold text-slate-500 print:text-black">
+                      <span>IC: {selectedPatient.users.user_ic}</span>
+                      <span>DOB: {selectedPatient.users.user_date_of_birth || 'N/A'}</span>
+                      <span>Vintage: {selectedPatient.dialysis_start_date || 'N/A'}</span>
+                    </div>
+                  </div>
                 </div>
-                
-                {/* SEROLOGY UPLOAD/VIEW SECTION */}
-                <div className="flex gap-2 mt-4">
-                  {selectedPatient.serology_report_url ? (
-                    <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-100 hover:bg-emerald-100 flex items-center gap-2">
-                      <FiCheckCircle /> View Serology
-                    </a>
-                  ) : (
-                    <span className="text-xs px-4 py-2 bg-red-50 text-red-600 font-bold rounded-xl border border-red-100 flex items-center gap-2">
-                       Missing Report
-                    </span>
-                  )}
-                  
-                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
-                  <button 
-                    disabled={isUploading}
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-xs px-4 py-2 bg-slate-900 text-white font-bold rounded-xl hover:bg-black flex items-center gap-2 transition-all active:scale-95 disabled:bg-slate-400"
-                  >
-                    {isUploading ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
-                    {selectedPatient.serology_report_url ? "Update Serology" : "Upload Report"}
-                  </button>
+                <div className="text-right">
+                  <span className="px-3 py-1 bg-red-50 text-red-600 rounded-lg text-[10px] font-black uppercase tracking-widest block mb-2 print:border print:border-black print:bg-white print:text-black">
+                    Blood: {selectedPatient.patient_blood_type} | HepB: {selectedPatient.hepatitis_b_status}
+                  </span>
+                  <p className="text-xs font-bold text-slate-600 print:text-black">Primary Dx: <span className="text-slate-900 print:text-black">{selectedPatient.primary_diagnosis || 'Not recorded'}</span></p>
                 </div>
               </div>
-              
-              {!isEditing ? (
-                <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-500/20">
-                  <FiEdit2 /> Update RX
-                </button>
-              ) : (
-                <button onClick={() => setIsEditing(false)} className="flex items-center gap-2 px-6 py-2.5 bg-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-300">
-                  <FiX /> Cancel
-                </button>
-              )}
             </div>
 
-            <div className="p-8 flex-1 overflow-y-auto bg-white">
-              <div className="grid grid-cols-2 gap-8">
-                <div className="space-y-3">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Target Dry Weight (kg)</label>
-                  <input type="number" step="0.1" disabled={!isEditing} value={prescriptionForm.target_dry_weight} onChange={e => setPrescriptionForm({...prescriptionForm, target_dry_weight: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-100 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-bold text-lg transition-all" />
-                </div>
-                <div className="space-y-3">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Target Duration</label>
-                  <select disabled={!isEditing} value={prescriptionForm.target_duration} onChange={e => setPrescriptionForm({...prescriptionForm, target_duration: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-100 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-bold text-lg transition-all">
-                    <option value="180">3 Hours (180m)</option>
-                    <option value="240">4 Hours (240m)</option>
-                    <option value="300">5 Hours (300m)</option>
-                  </select>
-                </div>
-                <div className="space-y-3">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Dialysis Modality</label>
-                  <select disabled={!isEditing} value={prescriptionForm.treatment_modality} onChange={e => setPrescriptionForm({...prescriptionForm, treatment_modality: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-100 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-bold text-lg transition-all">
-                    <option value="HD">Standard HD</option>
-                    <option value="HDF">HemoDiaFiltration (HDF)</option>
-                  </select>
-                </div>
-                <div className="flex flex-col justify-end pb-1">
-                   <label className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
-                      <input type="checkbox" disabled={!isEditing} checked={prescriptionForm.is_heparin_free} onChange={e => setPrescriptionForm({...prescriptionForm, is_heparin_free: e.target.checked, heparin_dosage: ''})} className="w-6 h-6 rounded-lg text-blue-600 border-slate-300" />
-                      <span className="font-bold text-slate-700">Heparin-Free</span>
-                   </label>
-                </div>
-                {!prescriptionForm.is_heparin_free && (
-                  <div className="space-y-3 col-span-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Heparin Dosage (IU)</label>
-                    <input type="number" disabled={!isEditing} value={prescriptionForm.heparin_dosage} onChange={e => setPrescriptionForm({...prescriptionForm, heparin_dosage: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-100 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none font-bold text-lg transition-all" />
-                  </div>
-                )}
-              </div>
+            {/* NAVIGATION TABS (Hidden when printing) */}
+            <div className="flex gap-2 print:hidden">
+              {[
+                { id: 'rx', label: 'Dialysis Prescription', icon: <FiEdit2 /> },
+                { id: 'clinical', label: 'Labs, Access & RKF', icon: <FiTrendingUp /> },
+                { id: 'history', label: 'Intradialytic Tolerance', icon: <FiActivity /> }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === tab.id ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'}`}
+                >
+                  {tab.icon} {tab.label}
+                </button>
+              ))}
+            </div>
 
-              {isEditing && (
-                <div className="mt-12 flex justify-end">
-                  <button onClick={handleSavePrescription} className="px-10 py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center gap-3">
-                    <FiSave className="text-xl" /> Confirm & Authorize RX
-                  </button>
-                </div>
+            {/* TAB CONTENT */}
+            <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-y-auto p-8 print:border-none print:shadow-none print:p-0 print:overflow-visible">
+              
+              {/* SECTION 2: PRESCRIPTION EDITOR */}
+              {activeTab === 'rx' && (
+                <section>
+                  <div className="flex justify-between items-center mb-8 pb-4 border-b border-slate-100 print:border-black print:mt-8">
+                    <div>
+                      <h3 className="text-xl font-black text-slate-900 print:text-black">Official Dialysis Prescription</h3>
+                      <p className="text-xs font-bold text-slate-500 mt-1 flex items-center gap-1 print:text-black"><FiShield className="text-emerald-500 print:hidden"/> Clinical Document</p>
+                    </div>
+                    <div className="flex gap-3 print:hidden">
+                      {/* NEW PDF EXPORT BUTTON */}
+                      <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                        <FiPrinter /> Export PDF
+                      </button>
+                      
+                      {!isEditing ? (
+                        <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md shadow-blue-200">
+                          <FiEdit2 /> Modify Parameters
+                        </button>
+                      ) : (
+                        <>
+                          <button onClick={() => setIsEditing(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">Cancel</button>
+                          <button onClick={handleSavePrescription} className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-sm shadow-md shadow-emerald-200">
+                            <FiSave /> Authorize & Sign
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-10 print:grid-cols-4 print:gap-y-6">
+                    
+                    {/* A. Dose Parameters */}
+                    <div className="col-span-2 lg:col-span-4 grid grid-cols-4 gap-6 print:gap-2">
+                      <div className="col-span-4"><p className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-blue-100 pb-2 print:text-black print:border-black">A. Dialysis Dose Parameters</p></div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Frequency</label>
+                        <select disabled={!isEditing} value={rxForm.session_frequency} onChange={e => setRxForm({...rxForm, session_frequency: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1">
+                          <option value="2">2x / Week</option>
+                          <option value="3">3x / Week</option>
+                          <option value="4">4x / Week</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Duration (mins)</label>
+                        <input type="number" disabled={!isEditing} value={rxForm.target_duration} onChange={e => setRxForm({...rxForm, target_duration: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Blood Flow (Qb)</label>
+                        <input type="number" disabled={!isEditing} value={rxForm.blood_flow_rate} onChange={e => setRxForm({...rxForm, blood_flow_rate: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Target Kt/V</label>
+                        <input type="number" step="0.1" disabled={!isEditing} value={rxForm.target_ktv} onChange={e => setRxForm({...rxForm, target_ktv: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                    </div>
+
+                    {/* B. Ultrafiltration */}
+                    <div className="col-span-2 lg:col-span-4 grid grid-cols-2 gap-6 print:gap-2">
+                      <div className="col-span-2"><p className="text-[10px] font-black text-amber-600 uppercase tracking-widest border-b border-amber-100 pb-2 print:text-black print:border-black">B. Ultrafiltration & Volume Control</p></div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Target Dry Weight (kg)</label>
+                        <input type="number" step="0.1" disabled={!isEditing} value={rxForm.target_dry_weight} onChange={e => setRxForm({...rxForm, target_dry_weight: e.target.value})} className="w-full p-4 bg-amber-50 border border-amber-200 rounded-xl font-black text-amber-900 text-lg shadow-inner print:border-black print:bg-white print:p-1 print:shadow-none" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Modality</label>
+                        <select disabled={!isEditing} value={rxForm.treatment_modality} onChange={e => setRxForm({...rxForm, treatment_modality: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1">
+                          <option value="HD">Standard HD</option>
+                          <option value="HDF">HemoDiaFiltration (HDF)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* C. Dialysate Composition */}
+                    <div className="col-span-2 lg:col-span-4 grid grid-cols-5 gap-4 print:gap-2">
+                      <div className="col-span-5"><p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2 print:text-black print:border-black">C. Dialysate Composition</p></div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Sodium (Na)</label>
+                        <input type="number" disabled={!isEditing} value={rxForm.dialysate_sodium} onChange={e => setRxForm({...rxForm, dialysate_sodium: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Potassium (K)</label>
+                        <input type="number" step="0.1" disabled={!isEditing} value={rxForm.dialysate_potassium} onChange={e => setRxForm({...rxForm, dialysate_potassium: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Calcium (Ca)</label>
+                        <input type="number" step="0.01" disabled={!isEditing} value={rxForm.dialysate_calcium} onChange={e => setRxForm({...rxForm, dialysate_calcium: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Bicarbonate</label>
+                        <input type="number" step="0.1" disabled={!isEditing} value={rxForm.dialysate_bicarbonate} onChange={e => setRxForm({...rxForm, dialysate_bicarbonate: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Temp (°C)</label>
+                        <input type="number" step="0.5" disabled={!isEditing} value={rxForm.dialysate_temp} onChange={e => setRxForm({...rxForm, dialysate_temp: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1" />
+                      </div>
+                    </div>
+
+                    {/* D. Anticoagulation */}
+                    <div className="col-span-2 lg:col-span-4 grid grid-cols-2 gap-6 print:gap-2">
+                      <div className="col-span-2"><p className="text-[10px] font-black text-purple-600 uppercase tracking-widest border-b border-purple-100 pb-2 print:text-black print:border-black">D. Anticoagulation</p></div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Regimen Type</label>
+                        <select disabled={!isEditing} value={rxForm.anticoagulation_profile} onChange={e => setRxForm({...rxForm, anticoagulation_profile: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 print:border-black print:bg-white print:p-1">
+                          <option value="Standard Heparin">Standard Heparin</option>
+                          <option value="LMWH">Low Molecular Weight Heparin (LMWH)</option>
+                          <option value="Heparin-Free">Heparin-Free</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 print:text-black">Dosage (IU)</label>
+                        <input type="text" disabled={!isEditing || rxForm.anticoagulation_profile === 'Heparin-Free'} value={rxForm.anticoagulation_profile === 'Heparin-Free' ? '0' : rxForm.heparin_dosage} onChange={e => setRxForm({...rxForm, heparin_dosage: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 disabled:opacity-50 print:border-black print:bg-white print:p-1" />
+                      </div>
+                    </div>
+
+                    {/* E. Clinical Notes & Warnings for Nurses */}
+                    <div className="col-span-2 lg:col-span-4 grid grid-cols-1 gap-6 print:gap-2 mt-4">
+                      <div>
+                        <p className="text-[10px] font-black text-red-600 uppercase tracking-widest border-b border-red-100 pb-2 print:text-black print:border-black flex items-center gap-2">
+                          <FiAlertCircle /> E. Special Nursing Instructions & Cautions
+                        </p>
+                        <textarea 
+                          disabled={!isEditing} 
+                          value={rxForm.nursing_instructions} 
+                          onChange={e => setRxForm({...rxForm, nursing_instructions: e.target.value})} 
+                          placeholder="Type any specific warnings, reminders, or monitoring instructions for the nursing staff here..."
+                          className="w-full mt-4 p-4 bg-red-50/30 border border-red-100 rounded-xl font-bold text-slate-700 h-24 resize-none focus:border-red-400 focus:bg-white outline-none transition-colors print:border-black print:bg-white print:h-auto print:min-h-[60px]" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Print Signature Line */}
+                  <div className="hidden print:block mt-16 pt-8 border-t border-black">
+                    <p className="text-sm font-bold text-black mb-16">Prescribing Nephrologist Signature:</p>
+                    <div className="w-64 border-b border-black"></div>
+                    <p className="text-xs text-black mt-2">Date: ____________________</p>
+                  </div>
+                </section>
               )}
+
+              {/* SECTION 3, 4, 5 & 7: READ ONLY CLINICAL DATA */}
+              {activeTab === 'clinical' && (
+                <section className="space-y-8 animate-in fade-in print:hidden">
+                  
+                  {/* UPLOAD REPORT SECTION (Re-integrated) */}
+                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex justify-between items-center">
+                    <div>
+                      <h4 className="font-black text-blue-900 flex items-center gap-2 mb-1"><FiFileText /> Lab & Serology Reports</h4>
+                      <p className="text-xs text-blue-700 font-medium">Status: {selectedPatient.serology_document_status || 'Missing'}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      {selectedPatient.serology_report_url && (
+                        <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-50 flex items-center gap-2 transition-colors">
+                          <FiCheckCircle /> View Active File
+                        </a>
+                      )}
+                      
+                      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
+                      <button 
+                        disabled={isUploading}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="text-xs px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-blue-400"
+                      >
+                        {isUploading ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
+                        {selectedPatient.serology_report_url ? "Update Document" : "Upload Document"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                    {/* Vascular Access */}
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                      <h4 className="font-black text-slate-900 flex items-center gap-2 mb-4"><FiActivity className="text-blue-500"/> Vascular Access Status</h4>
+                      <div className="space-y-3">
+                        <p className="text-sm"><span className="text-slate-500 font-bold">Type:</span> <span className="font-black">{selectedPatient.vascular_access_type || 'Unknown'}</span></p>
+                        <p className="text-sm"><span className="text-slate-500 font-bold">Location:</span> <span className="font-black">{selectedPatient.vascular_access_location || 'Unknown'}</span></p>
+                        <p className="text-sm"><span className="text-slate-500 font-bold">Known Complications:</span> <span className="font-black text-red-600">{selectedPatient.vascular_access_complications || 'None reported'}</span></p>
+                      </div>
+                    </div>
+
+                    {/* RKF */}
+                    <div className="bg-amber-50 p-6 rounded-2xl border border-amber-200">
+                      <h4 className="font-black text-amber-900 flex items-center gap-2 mb-4"><FiDroplet className="text-amber-500"/> Residual Kidney Function</h4>
+                      <div className="space-y-3">
+                        <p className="text-sm"><span className="text-amber-700 font-bold">24h Urine Output:</span> <span className="font-black text-amber-900">{selectedPatient.residual_urine_output || 0} mL/day</span></p>
+                        <p className="text-sm"><span className="text-amber-700 font-bold">Last Assessed:</span> <span className="font-black">{selectedPatient.last_rkf_assessment || 'No data'}</span></p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Medications */}
+                  <div className="border border-slate-200 rounded-2xl p-6">
+                    <h4 className="font-black text-slate-900 mb-4 text-sm uppercase tracking-widest">Active Medication Profile</h4>
+                    <p className="text-sm font-bold text-slate-600 bg-slate-50 p-4 rounded-xl">{selectedPatient.current_medications || 'No current medications logged.'}</p>
+                  </div>
+                </section>
+              )}
+
+              {/* SECTION 6: INTRADIALYTIC TOLERANCE */}
+              {activeTab === 'history' && (
+                <section className="animate-in fade-in print:hidden">
+                  <h4 className="font-black text-slate-900 mb-6 flex items-center gap-2"><FiClipboard className="text-slate-400"/> Recent Session Tolerance (Nursing Logs)</h4>
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">
+                    {selectedPatient.treatments && selectedPatient.treatments.length > 0 ? (
+                      selectedPatient.treatments.slice(0, 5).map((t: any, i: number) => (
+                        <div key={i} className="p-4 bg-slate-50 hover:bg-white transition-colors flex justify-between items-center">
+                          <div>
+                            <p className="font-black text-slate-800">{new Date(t.session_date).toLocaleDateString()}</p>
+                            <p className="text-xs font-bold text-slate-500 mt-1">UF Removed: {t.fluid_removed || 0} L</p>
+                          </div>
+                          <div className="text-right">
+                            {t.session_complications ? (
+                              <span className="px-3 py-1 bg-red-100 text-red-700 text-[10px] font-black uppercase rounded-lg flex items-center gap-1"><FiAlertCircle /> {t.session_complications}</span>
+                            ) : (
+                              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase rounded-lg">Tolerated Well</span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-8 text-center text-slate-400 font-bold text-sm">No historical treatment logs found.</div>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-4 font-bold flex items-center gap-1"><FiAlertCircle /> Note: Session logs are recorded securely by nursing staff and cannot be modified here.</p>
+                </section>
+              )}
+
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-200">
-            <FiFileText className="text-8xl mb-4 opacity-10" />
-            <p className="font-black uppercase tracking-widest text-xs">Patient File Not Selected</p>
+          <div className="flex-1 bg-white rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300 print:hidden">
+            <FiActivity className="text-6xl mb-4" />
+            <p className="font-black uppercase tracking-widest text-sm">Select Patient for Clinical Review</p>
           </div>
         )}
       </div>

@@ -1,8 +1,10 @@
+// 
+
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
-import { FiActivity, FiCheckCircle, FiXCircle } from 'react-icons/fi';
+import { FiActivity, FiCheckCircle, FiXCircle, FiAlertTriangle } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
   const year = d.getFullYear();
@@ -68,6 +70,19 @@ export default function ManagerWeeklyRoster() {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [isSaving, setIsSaving] = useState(false);
 
+  // --- NEW: Simulated Pending Leave Requests Inbox ---
+  const [pendingLeaves, setPendingLeaves] = useState([
+    {
+      id: 1,
+      doctorId: 1001, // Dummy ID for Nephrologist
+      doctorName: 'Dr. Ahmad Bin Bakar',
+      startDate: '2026-05-12',
+      endDate: '2026-05-15',
+      leaveType: 'Medical Conference',
+      coveringDoctor: 'Dr. Lim (Ext. 402)'
+    }
+  ]);
+
   const fetchData = async () => {
     setIsLoading(true);
     try {
@@ -85,7 +100,6 @@ export default function ManagerWeeklyRoster() {
 
       const [branchRes, nursesRes] = await Promise.all([
         supabase.from('branches').select('*').eq('id', branchId).single(),
-        // This strictly pulls ONLY nurses currently assigned to your branch
         supabase.from('users').select('user_id, user_fullname, staff(max_weekly_hours)').eq('branch_id', branchId).eq('role_id', 4)
       ]);
 
@@ -95,7 +109,6 @@ export default function ManagerWeeklyRoster() {
       const weekStartStr = getLocalISODate(weekDays[0]);
       const weekEndStr = getLocalISODate(weekDays[6]);
       
-      // RESTORED: Strictly fetch shifts assigned to THIS branch
       const { data: weekData } = await supabase
         .from('staff_roster')
         .select('*')
@@ -107,7 +120,6 @@ export default function ManagerWeeklyRoster() {
       const monthStartStr = getLocalISODate(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1));
       const monthEndStr = getLocalISODate(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0));
       
-      // RESTORED: Strictly fetch shifts assigned to THIS branch
       const { data: monthData } = await supabase
         .from('staff_roster')
         .select('shift_date, shift_type')
@@ -126,13 +138,52 @@ export default function ManagerWeeklyRoster() {
 
   useEffect(() => { fetchData(); }, [currentWeekStart, currentMonth]);
 
+  // --- NEW: Safety Protocol Approval Logic ---
+  const handleApproveLeave = async (reqId: number, doctorId: number, doctorName: string, startDate: string, endDate: string, coveringDoctor: string) => {
+    try {
+      // 1. Update the Roster Table
+      await supabase
+        .from('staff_roster')
+        .update({ shift_type: 'ANNUAL_LEAVE', remarks: `Covering: ${coveringDoctor}` })
+        .eq('nurse_id', doctorId) // Note: your schema uses nurse_id for all staff IDs
+        .gte('shift_date', startDate)
+        .lte('shift_date', endDate);
+
+      // 2. Blast Safety Notification to all Nurses in the branch
+      if (nurses.length > 0) {
+        const nurseNotifications = nurses.map(nurse => ({
+          user_id: nurse.user_id,
+          title: '🚨 CLINICAL COVERAGE UPDATE',
+          message: `${doctorName} is on leave from ${startDate} to ${endDate}. For clinical escalations, please route to ${coveringDoctor}.`,
+          type: 'System'
+        }));
+        await supabase.from('notifications').insert(nurseNotifications);
+      }
+      
+      // 3. Notify the Doctor
+      await supabase.from('notifications').insert({
+        user_id: doctorId,
+        title: 'Leave Approved',
+        message: `Your leave for ${startDate} to ${endDate} has been approved. The nursing team has been notified.`,
+        type: 'System'
+      });
+
+      alert(`Leave approved! ${nurses.length} nurses have been notified of the coverage plan.`);
+      
+      // Remove from pending list
+      setPendingLeaves(prev => prev.filter(req => req.id !== reqId));
+      fetchData(); // Refresh the roster view
+
+    } catch (err: any) {
+      alert("Error approving leave: " + err.message);
+    }
+  };
+
   const handleEmptyCellClick = (nurseId: number, dateStr: string) => {
-    // Check if the clicked date is a Sunday
     const isSunday = parseDateLocal(dateStr).getDay() === 0;
 
     setFormData({ 
       nurse_id: nurseId.toString(), 
-      // Automatically default to OFF_DAY if it's Sunday
       shift_type: isSunday ? 'OFF_DAY' : 'WORK', 
       startDate: dateStr, 
       endDate: dateStr,
@@ -260,16 +311,13 @@ export default function ManagerWeeklyRoster() {
         const dayShifts = existingShifts.filter(s => s.shift_date === targetDate && s.id !== editingShiftId);
         
         for (let shift of dayShifts) {
-          
-          // --- GHOST SHIFT CLEANUP ---
-          // If the shift belongs to another branch, it's leftover data from before the nurse was transferred.
           if (Number(shift.branch_id) !== Number(branchData.id)) {
-            ghostShiftIds.push(shift.id); // Tag it for deletion
-            continue; // Skip the conflict check so you can schedule them
+            ghostShiftIds.push(shift.id); 
+            continue; 
           }
 
           if (!isWork || shift.shift_type !== 'WORK') {
-             throw new Error(`Conflict on ${targetDate}: Nurse already has an assignment/leave.`);
+             throw new Error(`Conflict on ${targetDate}: Staff already has an assignment/leave.`);
           }
           const existStart = timeToMins(shift.start_time);
           const existEnd = timeToMins(shift.end_time);
@@ -279,7 +327,6 @@ export default function ManagerWeeklyRoster() {
         }
       }
 
-      // Delete the leftover shifts from the previous branch before saving yours
       if (ghostShiftIds.length > 0) {
          await supabase.from('staff_roster').delete().in('id', ghostShiftIds);
       }
@@ -323,7 +370,7 @@ export default function ManagerWeeklyRoster() {
         message: notifMsg
       });
 
-      setMessage({ type: 'success', text: `Schedule successfully ${modalMode === 'add' ? 'saved' : 'updated'}. Nurse notified.` });
+      setMessage({ type: 'success', text: `Schedule successfully ${modalMode === 'add' ? 'saved' : 'updated'}. Staff notified.` });
       fetchData();
       setTimeout(() => setIsModalOpen(false), 1000);
 
@@ -396,6 +443,43 @@ if (isLoading && !branchData) {
           </div>
         </div>
 
+        {/* --- NEW: PENDING LEAVES INBOX --- */}
+        {pendingLeaves.length > 0 && (
+          <div className="mb-8 animate-in slide-in-from-top-2">
+            <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <FiAlertTriangle className="text-amber-500" /> Pending Clinical Leave Requests
+            </h2>
+            <div className="flex flex-col gap-4">
+              {pendingLeaves.map(req => (
+                <div key={req.id} className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5 flex items-center justify-between border-l-4 border-l-amber-500">
+                  <div className="flex items-start gap-4">
+                    <div className="h-10 w-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center font-black shrink-0">DR</div>
+                    <div>
+                      <h3 className="font-black text-slate-900">{req.doctorName}</h3>
+                      <p className="text-xs font-bold text-slate-500 mt-1">
+                        {req.leaveType} • <span className="text-slate-800">{req.startDate} to {req.endDate}</span>
+                      </p>
+                      <p className="text-xs font-bold text-blue-600 mt-1 bg-blue-50 inline-block px-2 py-0.5 rounded">
+                        Coverage: {req.coveringDoctor}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <button onClick={() => setPendingLeaves(prev => prev.filter(p => p.id !== req.id))} className="px-4 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-colors">Decline</button>
+                    <button 
+                      onClick={() => handleApproveLeave(req.id, req.doctorId, req.doctorName, req.startDate, req.endDate, req.coveringDoctor)} 
+                      className="px-4 py-2 bg-amber-500 text-white font-bold rounded-lg text-xs hover:bg-amber-600 shadow-md transition-colors"
+                    >
+                      Approve & Notify Nurses
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* MONTHLY WIDGET */}
         <div className='bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-8'>
           <div className='px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center'>
@@ -450,7 +534,6 @@ if (isLoading && !branchData) {
                 </th>
                 {weekDays.map((date, i) => {
                   const dateStr = getLocalISODate(date);
-                  // Safety capacity only counts shifts mapped to this specific branch
                   const workingNursesToday = weeklyRoster.filter(s => s.shift_date === dateStr && s.shift_type === 'WORK' && s.branch_id === branchData?.id).length;
                   const safeCapacity = workingNursesToday * PATIENTS_PER_NURSE;
 
