@@ -8,7 +8,7 @@ import {
   FiMapPin, FiMail, FiPhone, FiCheckCircle, FiSave, FiAlertCircle
 } from 'react-icons/fi';
 
-export default function NephrologistSettings() {
+export default function NurseSettings() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -61,8 +61,8 @@ export default function NephrologistSettings() {
             fullname: userData.user_fullname || 'Unknown',
             ic: userData.user_ic || 'N/A',
             email: userData.user_email || '',
-            role: userData.user_role || 'Nephrologist',
-            branch: Array.isArray(branchInfo) ? branchInfo[0]?.branch_name : branchInfo?.branch_name || 'Unassigned / All Branches'
+            role: userData.user_role || 'Staff Nurse',
+            branch: Array.isArray(branchInfo) ? branchInfo[0]?.branch_name : branchInfo?.branch_name || 'Unassigned'
           });
 
           // Set Editable Data
@@ -104,7 +104,7 @@ export default function NephrologistSettings() {
         .eq('user_email', session.session.user.email);
 
       if (error) throw error;
-      showFeedback('success', 'Practitioner contact information updated successfully.');
+      showFeedback('success', 'Profile contact information updated successfully.');
     } catch (err: any) {
       showFeedback('error', 'Failed to update profile: ' + err.message);
     } finally {
@@ -152,13 +152,12 @@ export default function NephrologistSettings() {
       
       {/* HEADER */}
       <div className="flex items-center gap-4 mb-8">
-        {/* Adjusted link to point to the Nephrologist Dashboard */}
-        <Link href="/nephrologist" className="h-10 w-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors shadow-sm">
+        <Link href="/nurse" className="h-10 w-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors shadow-sm">
           <FiArrowLeft className="text-xl" />
         </Link>
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Profile Settings</h1>
-          <p className="text-sm font-bold text-slate-500">Manage your practitioner account and security</p>
+          <p className="text-sm font-bold text-slate-500">Manage your clinical account and security</p>
         </div>
       </div>
 
@@ -176,7 +175,7 @@ export default function NephrologistSettings() {
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
             <h2 className="font-black text-slate-800 flex items-center gap-2">
-              <FiShield className="text-blue-500"/> Official Practitioner Identity
+              <FiShield className="text-blue-500"/> Official HR Identity
             </h2>
             <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-[10px] font-black uppercase tracking-widest">Read Only</span>
           </div>
@@ -186,7 +185,7 @@ export default function NephrologistSettings() {
                 {officialInfo.fullname.charAt(0)}
               </div>
               <div>
-                <h3 className="text-2xl font-black text-slate-900">Dr. {officialInfo.fullname}</h3>
+                <h3 className="text-2xl font-black text-slate-900">{officialInfo.fullname}</h3>
                 <p className="font-bold text-slate-500 mt-1">{officialInfo.role}</p>
               </div>
             </div>
@@ -197,7 +196,7 @@ export default function NephrologistSettings() {
             </div>
             
             <div className="space-y-1">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><FiMapPin /> Assigned Clinical Branch</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><FiMapPin /> Assigned Branch</p>
               <p className="font-black text-slate-900 bg-slate-50 p-3 rounded-xl border border-slate-100">{officialInfo.branch}</p>
             </div>
 
@@ -207,7 +206,7 @@ export default function NephrologistSettings() {
             </div>
           </div>
           <div className="bg-slate-50 p-4 border-t border-slate-100 text-center">
-            <p className="text-[10px] font-bold text-slate-400 uppercase">To change official identity or credential details, please contact system administration.</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase">To change official identity or branch transfer, please contact your Administrator.</p>
           </div>
         </div>
 
@@ -248,7 +247,7 @@ export default function NephrologistSettings() {
                 value={profileForm.emergency_contact} 
                 onChange={e => setProfileForm({...profileForm, emergency_contact: e.target.value})}
                 className="w-full p-3 bg-red-50/30 border border-red-100 rounded-xl outline-none focus:border-red-400 font-bold text-sm text-slate-900 placeholder:text-slate-400"
-                placeholder="e.g., Ali Bin Ahmad (Spouse) - 0198765432"
+                placeholder="e.g., Ali Bin Ahmad (Husband) - 0198765432"
               />
             </div>
 
