@@ -1,11 +1,12 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { FiArrowLeft, FiCheckCircle, FiAlertCircle, FiClock, FiActivity, FiDroplet, FiPlus, FiSave, FiAlertTriangle, FiUnlock, FiPauseCircle, FiPlayCircle } from 'react-icons/fi';
 
-export default function MonitorWorkstation() {
+// 1. Rename your main function to a regular component (not default export)
+function MonitorContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const patientId = searchParams.get('patient_id');
