@@ -1,11 +1,12 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { FiArrowLeft, FiAlertTriangle, FiDroplet, FiShield, FiPlayCircle, FiCheckSquare } from 'react-icons/fi';
 
-export default function StartTreatmentWorkstation() {
+// 1. Rename the main function to a regular component (remove "export default")
+function StartTreatmentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const patientId = searchParams.get('patient_id');
@@ -201,5 +202,14 @@ export default function StartTreatmentWorkstation() {
         </div>
       </div>
     </main>
+  );
+}
+
+// 2. The Next.js Wrapper (Mandatory for build to succeed)
+export default function StartTreatmentWorkstation() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-blue-600 font-bold animate-pulse">Loading Clinical Setup...</div>}>
+      <StartTreatmentContent />
+    </Suspense>
   );
 }
