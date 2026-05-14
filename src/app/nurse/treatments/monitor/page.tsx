@@ -3,9 +3,12 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { FiArrowLeft, FiCheckCircle, FiAlertCircle, FiClock, FiActivity, FiDroplet, FiPlus, FiSave, FiAlertTriangle, FiUnlock, FiPauseCircle, FiPlayCircle } from 'react-icons/fi';
+import { 
+  FiArrowLeft, FiCheckCircle, FiAlertCircle, FiClock, FiActivity, 
+  FiDroplet, FiPlus, FiSave, FiAlertTriangle, FiUnlock, FiPauseCircle, FiPlayCircle 
+} from 'react-icons/fi';
 
-// 1. Rename your main function to a regular component (not default export)
+// 1. We name this component "MonitorContent" (without export default)
 function MonitorContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -340,5 +343,14 @@ function MonitorContent() {
         </div>
       </div>
     </main>
+  );
+}
+
+// 2. The Next.js Wrapper (Mandatory for build to succeed)
+export default function MonitorWorkstation() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-blue-600 font-bold animate-pulse">Loading Charting Workstation...</div>}>
+      <MonitorContent />
+    </Suspense>
   );
 }
