@@ -3,7 +3,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import PatientBottomNav from '../../components/PatientBottomNav';
-import PatientPwaBanner from '../../components/PatientPwaBanner';
 
 import { 
   FiMapPin, FiCalendar, FiClock, FiChevronLeft, FiChevronRight,
@@ -614,7 +613,7 @@ export default function PatientHome() {
           </div>
         </div>
       )}
-      <PatientPwaBanner />
+      
 
     </div>
   );

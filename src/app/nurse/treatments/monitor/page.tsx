@@ -8,7 +8,6 @@ import {
   FiDroplet, FiPlus, FiSave, FiAlertTriangle, FiUnlock, FiPauseCircle, FiPlayCircle 
 } from 'react-icons/fi';
 
-// 1. We name this component "MonitorContent" (without export default)
 function MonitorContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -29,6 +28,7 @@ function MonitorContent() {
     post_weight: '', bp_sys: '', bp_dia: '', post_hr: '', fluid_removed: '', weight_loss: '', kt_v: '', injections: '', complications: ''
   });
 
+  const [customIntervention, setCustomIntervention] = useState('');
   const [hemostasisAchieved, setHemostasisAchieved] = useState(false);
   const [needlesIntact, setNeedlesIntact] = useState(false);
 
@@ -127,7 +127,7 @@ function MonitorContent() {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const logEntry = `[${time}] ${interventionText}\n`;
     setDischargeForm(prev => ({ ...prev, complications: prev.complications ? prev.complications + logEntry : logEntry }));
-    setInterventionFeedback("Intervention logged to Clinical Notes");
+    setInterventionFeedback("Intervention Logged Successfully");
     setTimeout(() => setInterventionFeedback(null), 3000);
   };
 
@@ -165,19 +165,41 @@ function MonitorContent() {
     }
   };
 
+  // --- HELPER: Formats minutes into "2h 15m" ---
+  const formatTimeHM = (mins: number) => {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
   if (isLoading) return <div className="p-8 text-center text-blue-600 font-bold animate-pulse">Loading Charting Workstation...</div>;
 
   return (
     <main className="p-4 sm:p-8 max-w-7xl mx-auto pb-24">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
-          <Link href="/nurse/treatments" className="h-10 w-10 bg-white border border-slate-200 rounded-full flex items-center justify-center hover:bg-slate-50 shadow-sm"><FiArrowLeft className="text-xl" /></Link>
+          <Link href="/nurse/treatments" className="h-10 w-10 bg-white border border-slate-200 rounded-full flex items-center justify-center hover:bg-slate-50 shadow-sm shrink-0"><FiArrowLeft className="text-xl" /></Link>
           <div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">Intradialytic Charting</h1>
             <p className="text-sm font-bold text-slate-500">Patient: {treatment?.patients?.users?.user_fullname || 'Unknown'}</p>
           </div>
         </div>
-        {isPaused ? <div className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 animate-pulse border border-red-200"><FiPauseCircle className="text-lg" /> Session Paused</div> : <div className="bg-amber-100 text-amber-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 animate-pulse border border-amber-200"><FiActivity className="text-lg" /> Session Active</div>}
+
+        {/* --- UPGRADED HEADER BADGES --- */}
+        <div className="flex items-center gap-3">
+          <div className="bg-white text-slate-700 px-4 py-2 rounded-xl text-xs font-black tracking-widest flex items-center gap-2 border border-slate-200 shadow-sm shrink-0">
+            <FiClock className="text-lg text-blue-500" /> {formatTimeHM(elapsedMinutes)} Elapsed
+          </div>
+          {isPaused ? (
+            <div className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 animate-pulse border border-red-200 shrink-0">
+              <FiPauseCircle className="text-lg" /> Paused
+            </div>
+          ) : (
+            <div className="bg-amber-100 text-amber-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 animate-pulse border border-amber-200 shrink-0">
+              <FiActivity className="text-lg" /> Active
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -186,14 +208,14 @@ function MonitorContent() {
             <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center"><h2 className="font-black text-slate-800 flex items-center gap-2"><FiClock className="text-blue-500"/> Chart New Vitals</h2></div>
             <form onSubmit={handleAddHourlyLog} className="p-6 bg-blue-50/30">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">BP (Sys)</label><input type="number" required value={newLog.bp_sys} onChange={e => setNewLog({...newLog, bp_sys: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">BP (Dia)</label><input type="number" required value={newLog.bp_dia} onChange={e => setNewLog({...newLog, bp_dia: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Heart Rate</label><input type="number" required value={newLog.hr} onChange={e => setNewLog({...newLog, hr: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">V/P</label><input type="number" required value={newLog.vp} onChange={e => setNewLog({...newLog, vp: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">TMP</label><input type="number" required value={newLog.tmp} onChange={e => setNewLog({...newLog, tmp: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">UF Rate</label><input type="number" step="0.01" required value={newLog.uf_rate} onChange={e => setNewLog({...newLog, uf_rate: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">B/F (Blood Flow)</label><input type="number" required value={newLog.bf} onChange={e => setNewLog({...newLog, bf: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Heparin Infused</label><input type="number" required value={newLog.hep} onChange={e => setNewLog({...newLog, hep: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">BP (Sys)</label><input type="number" required value={newLog.bp_sys} onChange={e => setNewLog({...newLog, bp_sys: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="120" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">BP (Dia)</label><input type="number" required value={newLog.bp_dia} onChange={e => setNewLog({...newLog, bp_dia: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="80" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Heart Rate</label><input type="number" required value={newLog.hr} onChange={e => setNewLog({...newLog, hr: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="75" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">V/P</label><input type="number" required value={newLog.vp} onChange={e => setNewLog({...newLog, vp: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="150" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">TMP</label><input type="number" required value={newLog.tmp} onChange={e => setNewLog({...newLog, tmp: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="100" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">UF Rate</label><input type="number" step="0.01" required value={newLog.uf_rate} onChange={e => setNewLog({...newLog, uf_rate: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="0.80" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">B/F (Blood Flow)</label><input type="number" required value={newLog.bf} onChange={e => setNewLog({...newLog, bf: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="300" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Heparin Infused</label><input type="number" required value={newLog.hep} onChange={e => setNewLog({...newLog, hep: e.target.value})} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-300" placeholder="1000" /></div>
               </div>
               <button type="submit" disabled={isLogging || isPaused} className="mt-5 w-full py-3 bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 disabled:bg-slate-400 hover:bg-slate-800 transition-colors"><FiPlus /> {isPaused ? 'Cannot Chart While Paused' : 'Save Chart Entry'}</button>
             </form>
@@ -233,11 +255,44 @@ function MonitorContent() {
 
         <div className="space-y-6">
           <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 relative">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Quick Interventions</h3>
-            <div className="grid grid-cols-1 gap-2">
-              <button onClick={() => handleQuickIntervention("Administered 100ml Normal Saline flush due to hypotension.")} className="text-left p-3 rounded-xl border border-blue-100 bg-blue-50/50 hover:bg-blue-100 font-bold text-sm text-blue-700 transition-colors flex items-center gap-2"><FiDroplet /> 100ml Saline Flush</button>
-              <button onClick={() => handleQuickIntervention("Patient reported cramping. UF rate temporarily decreased.")} className="text-left p-3 rounded-xl border border-amber-100 bg-amber-50/50 hover:bg-amber-100 font-bold text-sm text-amber-700 transition-colors flex items-center gap-2"><FiAlertTriangle /> Log Cramping / UF Drop</button>
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Interventions & Logs</h3>
+            <div className="grid grid-cols-1 gap-2 mb-4">
+              <button onClick={() => handleQuickIntervention("Administered 100ml Normal Saline flush due to hypotension.")} className="text-left p-3 rounded-xl border border-blue-100 bg-blue-50/50 hover:bg-blue-100 font-bold text-sm text-blue-700 transition-colors flex items-center gap-2"><FiDroplet className="shrink-0" /> 100ml Saline Flush</button>
+              <button onClick={() => handleQuickIntervention("Patient reported cramping. UF rate temporarily decreased.")} className="text-left p-3 rounded-xl border border-amber-100 bg-amber-50/50 hover:bg-amber-100 font-bold text-sm text-amber-700 transition-colors flex items-center gap-2"><FiAlertTriangle className="shrink-0" /> Log Cramping / UF Drop</button>
             </div>
+
+            <div className="flex items-center gap-2 pt-4 border-t border-slate-100">
+              <input 
+                type="text" 
+                value={customIntervention} 
+                onChange={e => setCustomIntervention(e.target.value)} 
+                placeholder="Type custom clinical note..." 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm placeholder:text-slate-400"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (customIntervention.trim()) {
+                      handleQuickIntervention(customIntervention);
+                      setCustomIntervention('');
+                    }
+                  }
+                }}
+              />
+              <button 
+                type="button"
+                onClick={() => {
+                  if (customIntervention.trim()) {
+                    handleQuickIntervention(customIntervention);
+                    setCustomIntervention('');
+                  }
+                }}
+                disabled={!customIntervention.trim()}
+                className="p-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 disabled:bg-slate-300 transition-colors shrink-0"
+              >
+                <FiPlus className="text-lg" />
+              </button>
+            </div>
+
             {interventionFeedback && <p className="text-[10px] font-black text-emerald-500 uppercase flex items-center gap-1 mt-3 animate-pulse bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100"><FiCheckCircle className="text-sm" /> {interventionFeedback}</p>}
           </div>
 
@@ -250,7 +305,12 @@ function MonitorContent() {
               <div className="py-4 text-center animate-in fade-in zoom-in-95 duration-500">
                 {isPaused ? <FiPauseCircle className="text-6xl text-red-500 mx-auto mb-4 animate-pulse" /> : <FiClock className="text-6xl text-blue-500 mx-auto mb-4 animate-pulse" />}
                 <h4 className="text-white font-black text-xl mb-1">{isPaused ? "Treatment Paused" : "Dialysis in Progress"}</h4>
-                <p className="text-slate-400 font-bold mb-6">{Math.max(targetMinutes - elapsedMinutes, 0)} minutes remaining of {targetMinutes} min prescription.</p>
+                
+                {/* --- UPGRADED REMAINING TIME TEXT --- */}
+                <p className="text-slate-400 font-bold mb-6">
+                  {formatTimeHM(Math.max(targetMinutes - elapsedMinutes, 0))} remaining of {formatTimeHM(targetMinutes)} prescription.
+                </p>
+                
                 <div className="w-full bg-slate-800 rounded-full h-4 mb-8 overflow-hidden shadow-inner">
                   <div className={`${isPaused ? 'bg-red-500' : 'bg-blue-500'} h-4 rounded-full transition-all duration-1000 ease-in-out relative`} style={{ width: `${Math.min((elapsedMinutes/targetMinutes)*100, 100)}%` }}>
                     {!isPaused && <div className="absolute top-0 right-0 bottom-0 left-0 bg-white/20 animate-pulse"></div>}
@@ -284,33 +344,33 @@ function MonitorContent() {
                       }
                       setDischargeForm({...dischargeForm, post_weight: newPostWeight, weight_loss: calculatedLoss, fluid_removed: calculatedLoss});
                     }} 
-                    className="w-full bg-transparent text-xl font-black text-white outline-none" placeholder="00.0" 
+                    className="w-full bg-transparent text-xl font-black text-white outline-none placeholder:text-slate-600" placeholder="e.g. 65.5" 
                   />
                 </div>
                 
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 col-span-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Post-BP(Sys)</label><input type="number" required value={dischargeForm.bp_sys} onChange={e => setDischargeForm({...dischargeForm, bp_sys: e.target.value})} className="w-full bg-transparent text-sm font-black text-white outline-none" /></div>
-                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 col-span-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Post-BP(Dia)</label><input type="number" required value={dischargeForm.bp_dia} onChange={e => setDischargeForm({...dischargeForm, bp_dia: e.target.value})} className="w-full bg-transparent text-sm font-black text-white outline-none" /></div>
-                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 col-span-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Heart Rate</label><input type="number" required value={dischargeForm.post_hr} onChange={e => setDischargeForm({...dischargeForm, post_hr: e.target.value})} className="w-full bg-transparent text-sm font-black text-white outline-none" /></div>
+                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 col-span-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Post-BP(Sys)</label><input type="number" required value={dischargeForm.bp_sys} onChange={e => setDischargeForm({...dischargeForm, bp_sys: e.target.value})} className="w-full bg-transparent text-sm font-black text-white outline-none placeholder:text-slate-600" placeholder="120" /></div>
+                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 col-span-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Post-BP(Dia)</label><input type="number" required value={dischargeForm.bp_dia} onChange={e => setDischargeForm({...dischargeForm, bp_dia: e.target.value})} className="w-full bg-transparent text-sm font-black text-white outline-none placeholder:text-slate-600" placeholder="80" /></div>
+                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 col-span-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Heart Rate</label><input type="number" required value={dischargeForm.post_hr} onChange={e => setDischargeForm({...dischargeForm, post_hr: e.target.value})} className="w-full bg-transparent text-sm font-black text-white outline-none placeholder:text-slate-600" placeholder="75" /></div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className={`p-3 rounded-xl border ${isUfMismatch ? 'bg-amber-900/30 border-amber-500/50' : 'bg-emerald-900/30 border-emerald-500/30'}`}>
                     <label className={`block text-[10px] font-black uppercase mb-1 flex flex-col gap-1 ${isUfMismatch ? 'text-amber-400' : 'text-emerald-400'}`}><span>U/F Removed</span><span className="text-slate-500">Target: {treatment?.target_uf} L</span></label>
-                    <input type="number" step="0.1" required value={dischargeForm.fluid_removed} onChange={e => setDischargeForm({...dischargeForm, fluid_removed: e.target.value})} className={`w-full bg-transparent text-lg font-black outline-none ${isUfMismatch ? 'text-amber-400' : 'text-emerald-400'}`} />
+                    <input type="number" step="0.1" required value={dischargeForm.fluid_removed} onChange={e => setDischargeForm({...dischargeForm, fluid_removed: e.target.value})} className={`w-full bg-transparent text-lg font-black outline-none placeholder:text-slate-600 ${isUfMismatch ? 'text-amber-400' : 'text-emerald-400'}`} placeholder="3.0" />
                   </div>
                   <div className="bg-slate-800 p-3 rounded-xl border border-slate-700">
                     <label className="block text-[10px] font-black text-slate-400 uppercase mb-5">WT Loss</label>
-                    <input type="number" step="0.1" required value={dischargeForm.weight_loss} onChange={e => setDischargeForm({...dischargeForm, weight_loss: e.target.value})} className="w-full bg-transparent text-lg font-black text-white outline-none" />
+                    <input type="number" step="0.1" required value={dischargeForm.weight_loss} onChange={e => setDischargeForm({...dischargeForm, weight_loss: e.target.value})} className="w-full bg-transparent text-lg font-black text-white outline-none placeholder:text-slate-600" placeholder="3.0" />
                   </div>
-                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">KT/V</label><input type="number" step="0.1" value={dischargeForm.kt_v} onChange={e => setDischargeForm({...dischargeForm, kt_v: e.target.value})} className="w-full bg-transparent text-lg font-black text-white outline-none" placeholder="1.4" /></div>
+                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">KT/V</label><input type="number" step="0.1" value={dischargeForm.kt_v} onChange={e => setDischargeForm({...dischargeForm, kt_v: e.target.value})} className="w-full bg-transparent text-lg font-black text-white outline-none placeholder:text-slate-600" placeholder="1.4" /></div>
                   <div className="bg-slate-800 p-3 rounded-xl border border-slate-700"><label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Injection</label><input type="text" value={dischargeForm.injections} onChange={e => setDischargeForm({...dischargeForm, injections: e.target.value})} className="w-full bg-transparent text-sm font-bold text-white outline-none placeholder:text-slate-600" placeholder="e.g. Recormon" /></div>
                 </div>
               </div>
 
               <div>
                 <label className="flex justify-between items-center mb-2"><span className="text-[10px] font-black text-slate-400 uppercase">Clinical Notes & Complications</span>{requiresExplanation && <span className="text-[10px] font-black text-amber-400 uppercase animate-pulse">Required</span>}</label>
-                <textarea value={dischargeForm.complications} onChange={e => setDischargeForm({...dischargeForm, complications: e.target.value})} className={`w-full p-3 bg-slate-800 border rounded-xl outline-none focus:border-emerald-500 font-medium text-sm text-slate-300 h-20 resize-none ${requiresExplanation && !hasRequiredExplanation ? 'border-amber-500/50 bg-amber-900/10' : 'border-slate-700'}`} placeholder={requiresExplanation ? "Explain UF mismatch or early termination..." : "Notes..."} />
+                <textarea value={dischargeForm.complications} onChange={e => setDischargeForm({...dischargeForm, complications: e.target.value})} className={`w-full p-3 bg-slate-800 border rounded-xl outline-none focus:border-emerald-500 font-medium text-sm text-slate-300 h-20 resize-none placeholder:text-slate-600 ${requiresExplanation && !hasRequiredExplanation ? 'border-amber-500/50 bg-amber-900/10' : 'border-slate-700'}`} placeholder={requiresExplanation ? "Explain UF mismatch or early termination..." : "Add final clinical notes..."} />
               </div>
 
               <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700 space-y-3">
@@ -346,7 +406,6 @@ function MonitorContent() {
   );
 }
 
-// 2. The Next.js Wrapper (Mandatory for build to succeed)
 export default function MonitorWorkstation() {
   return (
     <Suspense fallback={<div className="p-8 text-center text-blue-600 font-bold animate-pulse">Loading Charting Workstation...</div>}>

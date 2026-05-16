@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabase';
 import { 
   FiSearch, FiEdit2, FiSave, FiX, FiActivity, FiDroplet, 
   FiFileText, FiUploadCloud, FiTrendingUp, FiShield, FiClipboard,
-  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter
+  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter, FiMapPin
 } from 'react-icons/fi';
 
 export default function ClinicalPatientRecord() {
@@ -16,25 +16,21 @@ export default function ClinicalPatientRecord() {
   const [isUploading, setIsUploading] = useState(false);
   const [nephrologistId, setNephrologistId] = useState<number | null>(null);
 
+  // Filtering States
+  const [branches, setBranches] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [branchFilter, setBranchFilter] = useState('All');
+  const [prescriptionFilter, setPrescriptionFilter] = useState('All');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form State
   const [rxForm, setRxForm] = useState({
-    session_frequency: '3',
-    target_duration: '240',
-    blood_flow_rate: '300',
-    dialysate_flow_rate: '500',
-    dialyser_type: '',
-    target_ktv: '1.2',
-    target_dry_weight: '',
-    treatment_modality: 'HD',
-    dialysate_sodium: '138',
-    dialysate_potassium: '2.0',
-    dialysate_calcium: '1.25',
-    dialysate_bicarbonate: '32',
-    dialysate_temp: '36.5',
-    anticoagulation_profile: 'Standard Heparin',
-    heparin_dosage: '',
+    session_frequency: '3', target_duration: '240', blood_flow_rate: '300',
+    dialysate_flow_rate: '500', dialyser_type: '', target_ktv: '1.2',
+    target_dry_weight: '', treatment_modality: 'HD', dialysate_sodium: '138',
+    dialysate_potassium: '2.0', dialysate_calcium: '1.25', dialysate_bicarbonate: '32',
+    dialysate_temp: '36.5', anticoagulation_profile: 'Standard Heparin', heparin_dosage: '',
     nursing_instructions: ''
   });
 
@@ -43,7 +39,7 @@ export default function ClinicalPatientRecord() {
     const { data: session } = await supabase.auth.getSession();
     if (!session?.session) return;
     
-    const { data: user, error: userError } = await supabase.from('users').select('user_id, branch_id').eq('user_email', session.session.user.email).single();
+    const { data: user, error: userError } = await supabase.from('users').select('user_id').eq('user_email', session.session.user.email).single();
     if (userError || !user) {
       setIsLoading(false);
       return;
@@ -51,17 +47,32 @@ export default function ClinicalPatientRecord() {
     
     setNephrologistId(user.user_id);
 
-    const { data: homePatients } = await supabase
+    // 1. Fetch All Branches for the Filter Dropdown
+    const { data: branchData } = await supabase.from('branches').select('id, branch_name');
+    if (branchData) setBranches(branchData);
+
+    // 2. Fetch ALL Patients (Global View), removing the branch_id constraint
+    // FIXED DATABASE ERROR: patients table doesn't have 'created_at', ordering by patient_id instead.
+    const { data: allPatients, error: patientError } = await supabase
       .from('patients')
       .select(`
         *,
         users!inner(user_fullname, user_ic, user_date_of_birth),
+        branches(branch_name),
         prescriptions(*),
         treatments(session_date, session_status, fluid_removed, session_complications)
       `)
-      .eq('home_branch_id', user.branch_id);
+      .order('patient_id', { ascending: false });
 
-    setPatients(homePatients || []);
+    if (patientError) console.error("Error fetching patients:", patientError);
+
+    // 3. Process Rx Status for filtering
+    const processedPatients = allPatients?.map(p => {
+      const activeRx = Array.isArray(p.prescriptions) ? p.prescriptions.find((rx: any) => rx.status === 'Active') : null;
+      return { ...p, rxStatus: activeRx ? 'Active' : 'Missing/Expired' };
+    });
+
+    setPatients(processedPatients || []);
     setIsLoading(false);
   };
 
@@ -91,14 +102,12 @@ export default function ClinicalPatientRecord() {
         nursing_instructions: rx.nursing_instructions || '',
       });
     } else {
-      // Clear form if no active Rx
       setRxForm({ ...rxForm, target_dry_weight: '' }); 
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !selectedPatient) return;
-    
     const file = e.target.files[0];
     setIsUploading(true);
 
@@ -161,36 +170,86 @@ export default function ClinicalPatientRecord() {
     }
   };
 
-  // PDF Print Function
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = () => window.print();
 
-  if (isLoading) return <div className="p-8">Loading Clinical Workstation...</div>;
+  // --- FILTERING LOGIC ---
+  const filteredPatients = patients.filter(patient => {
+    const matchesSearch = patient.users?.user_fullname.toLowerCase().includes(searchTerm.toLowerCase()) || patient.users?.user_ic.includes(searchTerm);
+    const matchesBranch = branchFilter === 'All' || patient.home_branch_id?.toString() === branchFilter;
+    const matchesRx = prescriptionFilter === 'All' || patient.rxStatus === prescriptionFilter;
+    return matchesSearch && matchesBranch && matchesRx;
+  });
+
+  if (isLoading) return <div className="p-8 text-center font-bold text-blue-600"><FiActivity className="animate-spin mx-auto text-3xl mb-2" /> Loading Clinical Workstation...</div>;
 
   return (
     <main className="p-8 max-w-[1600px] mx-auto flex gap-8 h-[calc(100vh-2rem)] print:p-0 print:m-0 print:h-auto">
       
-      {/* DIRECTORY SIDEBAR (Hidden when printing) */}
-      <div className="w-1/4 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden print:hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50">
-          <h3 className="font-black text-slate-900 text-sm uppercase tracking-tighter">Clinical Directory</h3>
+      {/* DIRECTORY SIDEBAR (With Embedded Filters) */}
+      <div className="w-1/4 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden print:hidden min-w-[320px]">
+        <div className="p-5 border-b border-slate-100 bg-slate-50 space-y-3">
+          <h3 className="font-black text-slate-900 text-sm uppercase tracking-tighter flex items-center justify-between">
+            Clinical Directory
+            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px]">{filteredPatients.length}</span>
+          </h3>
+          
+          <div className="relative">
+            <FiSearch className="absolute left-3 top-3 text-slate-400" />
+            <input 
+              type="text" placeholder="Search name or IC..." 
+              value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-xs font-bold text-slate-700 shadow-sm"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <FiMapPin className="absolute left-2.5 top-2.5 text-slate-400" />
+              <select 
+                value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
+                className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
+              >
+                <option value="All">All Branches</option>
+                {branches.map(b => <option key={b.id} value={b.id.toString()}>{b.branch_name}</option>)}
+              </select>
+            </div>
+            
+            <div className="relative flex-1">
+              <FiFileText className="absolute left-2.5 top-2.5 text-slate-400" />
+              <select 
+                value={prescriptionFilter} onChange={e => setPrescriptionFilter(e.target.value)}
+                className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
+              >
+                <option value="All">All Rx Status</option>
+                <option value="Active">Active Rx</option>
+                <option value="Missing/Expired">Needs Review</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {patients.map(p => (
-            <button key={p.patient_id} onClick={() => handleSelectPatient(p)} className={`w-full text-left p-4 rounded-2xl mb-2 transition-all ${selectedPatient?.patient_id === p.patient_id ? 'bg-blue-900 text-white shadow-lg' : 'hover:bg-slate-50'}`}>
-              <p className="font-bold leading-tight">{p.users.user_fullname}</p>
-              <p className={`text-[10px] font-black uppercase mt-1 ${selectedPatient?.patient_id === p.patient_id ? 'text-blue-300' : 'text-slate-400'}`}>IC: {p.users.user_ic}</p>
+
+        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+          {filteredPatients.map(p => (
+            <button key={p.patient_id} onClick={() => handleSelectPatient(p)} className={`w-full text-left p-4 rounded-2xl mb-2 transition-all border ${selectedPatient?.patient_id === p.patient_id ? 'bg-slate-900 border-slate-900 text-white shadow-lg' : 'bg-white border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
+              <div className="flex justify-between items-start">
+                <p className="font-bold leading-tight truncate pr-2">{p.users.user_fullname}</p>
+                {p.rxStatus !== 'Active' && <FiAlertCircle className="text-amber-500 shrink-0" />}
+              </div>
+              <p className={`text-[10px] font-black uppercase mt-1 flex gap-2 ${selectedPatient?.patient_id === p.patient_id ? 'text-slate-400' : 'text-slate-500'}`}>
+                <span>{p.users.user_ic}</span> • <span>{p.branches?.branch_name || 'Unassigned'}</span>
+              </p>
             </button>
           ))}
+          {filteredPatients.length === 0 && (
+            <div className="p-8 text-center text-xs font-bold text-slate-400">No patients match filters.</div>
+          )}
         </div>
       </div>
 
-      {/* WORKSTATION AREA (Expands to full width when printing) */}
-      <div className="w-3/4 flex flex-col gap-6 print:w-full print:block">
+      {/* WORKSTATION AREA */}
+      <div className="flex-1 flex flex-col gap-6 print:w-full print:block min-w-0">
         {selectedPatient ? (
           <>
-            {/* CORE IDENTIFICATION */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm print:border-black print:rounded-none print:shadow-none">
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-4">
@@ -215,8 +274,7 @@ export default function ClinicalPatientRecord() {
               </div>
             </div>
 
-            {/* NAVIGATION TABS (Hidden when printing) */}
-            <div className="flex gap-2 print:hidden">
+            <div className="flex gap-2 print:hidden overflow-x-auto pb-2">
               {[
                 { id: 'rx', label: 'Dialysis Prescription', icon: <FiEdit2 /> },
                 { id: 'clinical', label: 'Labs, Access & RKF', icon: <FiTrendingUp /> },
@@ -225,14 +283,13 @@ export default function ClinicalPatientRecord() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === tab.id ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'}`}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'}`}
                 >
                   {tab.icon} {tab.label}
                 </button>
               ))}
             </div>
 
-            {/* TAB CONTENT */}
             <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-y-auto p-8 print:border-none print:shadow-none print:p-0 print:overflow-visible">
               
               {/* SECTION 2: PRESCRIPTION EDITOR */}
@@ -244,7 +301,6 @@ export default function ClinicalPatientRecord() {
                       <p className="text-xs font-bold text-slate-500 mt-1 flex items-center gap-1 print:text-black"><FiShield className="text-emerald-500 print:hidden"/> Clinical Document</p>
                     </div>
                     <div className="flex gap-3 print:hidden">
-                      {/* NEW PDF EXPORT BUTTON */}
                       <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
                         <FiPrinter /> Export PDF
                       </button>
@@ -379,7 +435,6 @@ export default function ClinicalPatientRecord() {
               {activeTab === 'clinical' && (
                 <section className="space-y-8 animate-in fade-in print:hidden">
                   
-                  {/* UPLOAD REPORT SECTION (Re-integrated) */}
                   <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex justify-between items-center">
                     <div>
                       <h4 className="font-black text-blue-900 flex items-center gap-2 mb-1"><FiFileText /> Lab & Serology Reports</h4>
@@ -391,7 +446,6 @@ export default function ClinicalPatientRecord() {
                           <FiCheckCircle /> View Active File
                         </a>
                       )}
-                      
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
                       <button 
                         disabled={isUploading}
@@ -405,7 +459,6 @@ export default function ClinicalPatientRecord() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-6">
-                    {/* Vascular Access */}
                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
                       <h4 className="font-black text-slate-900 flex items-center gap-2 mb-4"><FiActivity className="text-blue-500"/> Vascular Access Status</h4>
                       <div className="space-y-3">
@@ -414,8 +467,6 @@ export default function ClinicalPatientRecord() {
                         <p className="text-sm"><span className="text-slate-500 font-bold">Known Complications:</span> <span className="font-black text-red-600">{selectedPatient.vascular_access_complications || 'None reported'}</span></p>
                       </div>
                     </div>
-
-                    {/* RKF */}
                     <div className="bg-amber-50 p-6 rounded-2xl border border-amber-200">
                       <h4 className="font-black text-amber-900 flex items-center gap-2 mb-4"><FiDroplet className="text-amber-500"/> Residual Kidney Function</h4>
                       <div className="space-y-3">
@@ -425,7 +476,6 @@ export default function ClinicalPatientRecord() {
                     </div>
                   </div>
 
-                  {/* Medications */}
                   <div className="border border-slate-200 rounded-2xl p-6">
                     <h4 className="font-black text-slate-900 mb-4 text-sm uppercase tracking-widest">Active Medication Profile</h4>
                     <p className="text-sm font-bold text-slate-600 bg-slate-50 p-4 rounded-xl">{selectedPatient.current_medications || 'No current medications logged.'}</p>
