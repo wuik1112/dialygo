@@ -322,6 +322,21 @@ export default function BranchManagement() {
       }
     }
 
+    if (newManagerId && (viewMode === 'add' || (viewMode === 'edit' && selectedBranch.manager_id !== newManagerId))) {
+        const assignedManager = managers.find(m => m.user_id === newManagerId);
+        if (assignedManager) {
+          fetch('/api/admin/notify-manager', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: assignedManager.user_email,
+              fullname: assignedManager.user_fullname,
+              branchName: formData.name.trim()
+            })
+          }).catch(err => console.error("Failed to trigger manager email:", err));
+        }
+      }
+      
     setIsModalOpen(false);
     setIsSubmitting(false);
     await fetchData();
@@ -333,7 +348,7 @@ export default function BranchManagement() {
     const { count: bookingCount } = await supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('branch_id', branchId).gte('booking_date', today).in('status', ['CONFIRMED', 'PENDING_REVIEW']);
 
     if ((bookingCount || 0) > 0 || (staffCount || 0) > 0) {
-      alert(`Cannot deactivate branch. There are ${bookingCount || 0} active future bookings and ${staffCount || 0} assigned staff.`);
+      alert(`Cannot deactivate branch. There are ${bookingCount || 0} active future bookings and ${staffCount || 0} assigned staff. Please reassign them first.`);
       return;
     }
 
@@ -344,8 +359,22 @@ export default function BranchManagement() {
   };
 
   const handleReactivate = async (branch: any) => {
-    await supabase.from('branches').update({ status: 'Active' }).eq('id', branch.id);
-    await fetchData();
+    if (branch.manager_id) {
+      const { data: managerData, error } = await supabase
+        .from('users')
+        .select('user_is_active, user_fullname')
+        .eq('user_id', branch.manager_id)
+        .single();
+
+      if (managerData && !managerData.user_is_active) {
+        alert(`Cannot reactivate branch. The assigned Branch Manager (${managerData.user_fullname}) is currently inactive. Please edit the branch to assign a new active manager first.`);
+        return;
+      }
+    }
+    if (window.confirm(`Reactivate ${branch.branch_name}?`)) {
+      await supabase.from('branches').update({ status: 'Active' }).eq('id', branch.id);
+      await fetchData();
+    }
   };
 
   const filteredBranches = branches.filter(b => filter === 'All' ? true : b.status === filter);

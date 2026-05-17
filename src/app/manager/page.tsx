@@ -20,6 +20,7 @@ const getLocalISODate = (d: Date) => {
 export default function ManagerDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [branchData, setBranchData] = useState<any>(null);
   const [managerName, setManagerName] = useState('');
   
@@ -40,7 +41,8 @@ export default function ManagerDashboard() {
     activeMachines: 0,
     downMachines: 0,
     staffOnDutyToday: 0,
-    totalHomePatients: 0
+    totalHomePatients: 0,
+    occupancyRate: 0
   });
 
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
@@ -121,16 +123,21 @@ export default function ManagerDashboard() {
         staffOnDutyToday = new Set(todayRoster?.map(r => r.nurse_id)).size;
       }
 
+      const totalCapacity = activeMachines * 6; // Standard: 1 machine handles 6 patients
+      const calculatedOccupancy = totalCapacity > 0 ? Math.round(((patientsData?.length || 0) / totalCapacity) * 100) : 0;
+      
       setBaseMetrics({
         pendingRequests: pendingCount || 0,
         activeMachines,
         downMachines,
         staffOnDutyToday,
-        totalHomePatients: patientsData?.length || 0
+        totalHomePatients: patientsData?.length || 0,
+        occupancyRate: calculatedOccupancy
       });
 
     } catch (error: any) {
       console.error("Dashboard error:", error.message);
+      setFetchError("Unable to load real-time metrics. Please check your network connection or try again later.");
     } finally {
       setIsLoading(false);
     }
@@ -390,6 +397,13 @@ export default function ManagerDashboard() {
           </div>
         </div>
 
+        {fetchError && (
+          <div className='mb-8 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3 shadow-sm animate-in fade-in'>
+            <FiAlertTriangle className='text-red-600 text-xl shrink-0' />
+            <p className='text-sm font-bold text-red-800'>{fetchError}</p>
+          </div>
+        )}
+
         {(baseMetrics.pendingRequests > 0 || baseMetrics.downMachines > 0) && (
           <div className='mb-8 flex flex-col gap-3'>
             {baseMetrics.pendingRequests > 0 && (
@@ -413,7 +427,27 @@ export default function ManagerDashboard() {
           </div>
         )}
 
-        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
+        <div className='grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8'>
+          
+          {/* --- NEW OCCUPANCY WIDGET --- */}
+          <div className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group hover:bg-slate-50 transition-colors'>
+            <div className='absolute right-0 top-0 w-24 h-24 bg-emerald-50 rounded-bl-full opacity-50 transition-all group-hover:scale-110'></div>
+            <div className='relative z-10'>
+              <div className='flex justify-between items-start mb-2'>
+                <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest'>Occupancy Rate</p>
+                <FiActivity className='text-xl text-emerald-500' />
+              </div>
+              <div className='flex items-baseline gap-1'>
+                <h3 className='text-3xl font-black text-slate-800'>{baseMetrics.occupancyRate}</h3>
+                <span className='text-lg font-bold text-slate-500'>%</span>
+              </div>
+            </div>
+            {/* Progress Bar */}
+            <div className='w-full bg-slate-100 rounded-full h-1.5 mt-4 overflow-hidden relative z-10'>
+              <div className={`h-full rounded-full transition-all ${baseMetrics.occupancyRate > 90 ? 'bg-rose-500' : baseMetrics.occupancyRate > 75 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(baseMetrics.occupancyRate, 100)}%` }}></div>
+            </div>
+          </div>
+
           <div className='bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden'>
             <div className='absolute right-0 top-0 w-24 h-24 bg-blue-50 rounded-bl-full opacity-50'></div>
             <div className='relative z-10'>

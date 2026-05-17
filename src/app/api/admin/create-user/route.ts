@@ -5,10 +5,9 @@ export async function POST(req: Request) {
   try {
     const { email, password } = await req.json();
     
-    // Uses the SECRET SERVICE ROLE KEY to bypass RLS and act as admin
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY! // Never expose this key to the frontend!
+      process.env.SUPABASE_SERVICE_ROLE_KEY! 
     );
 
     const { data, error } = await supabaseAdmin.auth.admin.createUser({

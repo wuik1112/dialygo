@@ -195,11 +195,27 @@ export default function ManagerMachineStatus() {
     try {
       if (!formData.serial_number.trim()) throw new Error("Serial Number is required.");
 
+      // ==========================================
+      // USE CASE ALT 2(a) & EXCEPTION 1(a).5: 
+      // Validation for calibration/maintenance records
+      // ==========================================
+      if (formData.status === 'Active' && !formData.last_calibration_date) {
+         throw new Error("Activation blocked. Missing required calibration records.");
+      }
+
       const isReactivating = modalMode === 'edit' && editingMachine.status === 'Under Maintenance' && formData.status === 'Active';
+      
+      // Enforcing business rule: "Machines must undergo maintenance after X sessions"
+      // (Using operating hours as the metric for usage sessions)
+      if ((isReactivating || formData.status === 'Active') && parseInt(formData.operating_hours) >= 4000 && !formData.last_maintenance_date) {
+         throw new Error("Activation blocked. Machine has exceeded maximum operating hours without documented maintenance.");
+      }
+
       let finalLastMaint = formData.last_maintenance_date || null;
       let finalNextMaint = formData.next_maintenance_date || null;
 
       if (isReactivating) {
+        // The manager confirms maintenance is complete
         const confirmAutoDate = window.confirm("Maintenance complete. Do you want the system to automatically set the Last Maintenance to today, and schedule the Next Maintenance for 6 months from now?");
         if (confirmAutoDate) {
           const today = new Date();
@@ -209,6 +225,39 @@ export default function ManagerMachineStatus() {
         }
       }
 
+      // ==========================================
+      // SAFETY CHECKS WHEN DEACTIVATING A MACHINE
+      // ==========================================
+      if (modalMode === 'edit' && formData.status !== 'Active' && editingMachine.status === 'Active') {
+        
+        // EXCEPTION 6(a): Safety Violation (Active Treatment Check)
+        const { count: activeTreatments, error: treatErr } = await supabase
+          .from('treatments')
+          .select('*', { count: 'exact', head: true })
+          .eq('machine_id', editingMachine.id)
+          .eq('status', 'IN_PROGRESS');
+          
+        if (activeTreatments && activeTreatments > 0) {
+          throw new Error("Safety Violation: Cannot update status while treatment is in progress.");
+        }
+
+        // EXCEPTION 8(a): Conflicting Upcoming Bookings
+        const todayStr = new Date().toISOString().split('T')[0];
+        const { count: futureBookings, error: bookErr } = await supabase
+          .from('bookings')
+          .select('*', { count: 'exact', head: true })
+          .eq('assigned_machine_id', editingMachine.id) 
+          .gte('booking_date', todayStr)
+          .in('status', ['CONFIRMED', 'PENDING_REVIEW']);
+
+        if (futureBookings && futureBookings > 0) {
+          throw new Error(`Cannot deactivate machine. There are ${futureBookings} upcoming bookings. Please reschedule them first.`);
+        }
+      }
+
+      // ==========================================
+      // DATABASE PAYLOAD & EXECUTION
+      // ==========================================
       const payload = {
         branch_id: branchData.id, serial_number: formData.serial_number.trim(), asset_tag: formData.asset_tag.trim() || null,
         manufacturer: formData.manufacturer.trim(), model: formData.model.trim(), software_version: formData.software_version.trim() || null,
@@ -234,6 +283,7 @@ export default function ManagerMachineStatus() {
         }
       }
 
+      // AUDIT LOG CREATION
       if (managerId && modalMode === 'edit' && editingMachine.status !== formData.status) {
         await supabase.from('notifications').insert({
           user_id: managerId, title: 'Audit Log: Machine Status Changed',
@@ -241,7 +291,7 @@ export default function ManagerMachineStatus() {
         });
       }
 
-      setMessage({ type: 'success', text: "Asset dossier updated securely." });
+      setMessage({ type: 'success', text: "Machine status updated successfully." });
       fetchData(); 
       setTimeout(() => setIsModalOpen(false), 1500);
 
@@ -320,7 +370,7 @@ export default function ManagerMachineStatus() {
 
           </div>
           <button onClick={handleAddClick} className='px-6 py-2.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 shadow-lg transition-all shrink-0'>
-            + Register New Asset
+            + Register New Machine
           </button>
         </div>
 
@@ -519,7 +569,7 @@ export default function ManagerMachineStatus() {
         <div className='fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in overflow-y-auto'>
           <div className='bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden my-8'>
             <div className='px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 sticky top-0 z-10'>
-              <h3 className='font-bold text-slate-800'>{modalMode === 'add' ? 'Register New Medical Asset' : 'Update Medical Asset Dossier'}</h3>
+              <h3 className='font-bold text-slate-800'>{modalMode === 'add' ? 'Register New Machine' : 'Update Machine'}</h3>
               <button onClick={() => setIsModalOpen(false)} className='text-slate-400 hover:text-slate-600 text-xl font-bold'><FiX /></button>
             </div>
             
@@ -539,7 +589,7 @@ export default function ManagerMachineStatus() {
                       ) : (
                         <div className='w-full h-40 bg-white rounded-lg flex flex-col items-center justify-center text-slate-400 group-hover:text-blue-500 transition-colors'>
                           <FiCamera className='text-3xl mb-2' />
-                          <span className='text-xs font-bold'>Upload Asset Photo</span>
+                          <span className='text-xs font-bold'>Upload Machine Photo</span>
                         </div>
                       )}
                       <div className='mt-2 px-1'>
@@ -670,7 +720,7 @@ export default function ManagerMachineStatus() {
               <div className='pt-6 flex justify-end gap-3 border-t border-slate-100 mt-6'>
                 <button type="button" onClick={() => setIsModalOpen(false)} className='px-6 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors'>Cancel</button>
                 <button type="submit" disabled={isSaving || isUploadingPhoto} className='px-8 py-2.5 text-white bg-blue-600 font-bold rounded-xl shadow-md transition-colors hover:bg-blue-700 disabled:bg-blue-300'>
-                  {isSaving ? 'Validating & Saving...' : 'Save Asset Dossier'}
+                  {isSaving ? 'Validating & Saving...' : 'Save Machine'}
                 </button>
               </div>
 

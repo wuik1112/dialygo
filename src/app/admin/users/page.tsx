@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useLoadScript, Autocomplete, GoogleMap, Marker } from '@react-google-maps/api';
-import { FiPhone, FiMapPin, FiLock, FiArrowUp, FiArrowDown, FiMinus, FiActivity } from 'react-icons/fi';
+import { FiArrowUp, FiArrowDown, FiMinus, FiActivity, FiCheckCircle} from 'react-icons/fi';
 
 const roleMap: Record<number, string> = {
   1: 'HQ Admin',
@@ -60,6 +60,7 @@ export default function UserManagement() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -175,6 +176,7 @@ export default function UserManagement() {
       patient_address: '', blood_type: '', license_number: '', max_hours: '48', employment_status: 'Full-Time'
     });
     setError('');
+    setSuccessMessage('');
     setIsModalOpen(true);
   };
 
@@ -303,6 +305,10 @@ export default function UserManagement() {
 
       setIsModalOpen(false);
       await fetchData();
+      if (!editingId) {
+        setSuccessMessage('User account created successfully.');
+        setTimeout(() => setSuccessMessage(''), 5000); 
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -311,9 +317,42 @@ export default function UserManagement() {
   };
 
   const toggleUserStatus = async (user: any) => {
-    if (window.confirm(`Change status for ${user.user_fullname}?`)) {
-      await supabase.from('users').update({ user_is_active: !user.user_is_active }).eq('user_id', user.user_id);
-      await fetchData();
+    const action = user.user_is_active ? 'Deactivate' : 'Reactivate';
+    
+    if (window.confirm(`${action} account for ${user.user_fullname}?`)) {
+      try {
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ user_is_active: !user.user_is_active })
+          .eq('user_id', user.user_id);
+
+        if (updateError) throw updateError;
+
+        if (!user.user_is_active) {
+          const emailRes = await fetch('/api/admin/notify-reactivation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              email: user.user_email, 
+              fullname: user.user_fullname 
+            })
+          });
+
+          if (!emailRes.ok) {
+             console.warn("Account reactivated, but failed to send email.");
+          }
+
+          setSuccessMessage(`${user.user_fullname}'s account reactivated and notification email sent.`);
+        } else {
+          setSuccessMessage(`${user.user_fullname}'s account deactivated successfully.`);
+        }
+
+        setTimeout(() => setSuccessMessage(''), 5000); // Clear message after 5 seconds
+        await fetchData();
+        
+      } catch (err: any) {
+        setError(err.message || `Failed to change user status.`);
+      }
     }
   };
 
@@ -369,6 +408,13 @@ export default function UserManagement() {
           </div>
           <button onClick={openAddModal} className='bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all'>+ Add User</button>
         </div>
+        
+        {successMessage && (
+          <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 shadow-sm">
+            <FiCheckCircle className="text-emerald-600 text-xl" />
+            <p className="text-sm font-bold text-emerald-700">{successMessage}</p>
+          </div>
+        )}
 
         {/* Filters Panel */}
         <div className='bg-white p-5 rounded-2xl shadow-sm border border-slate-200 mb-6 grid grid-cols-1 md:grid-cols-4 gap-4'>

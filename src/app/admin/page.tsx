@@ -11,10 +11,27 @@ export default function AdminDashboard() {
   useEffect(() => {
     async function fetchDashboardData() {
       try {
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        
+        // LOGIC FIX: Define the current week's boundary (Monday to Sunday)
+        const startOfWeek = new Date(today);
+        const dayOfWeek = today.getDay();
+        const diffToMonday = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+        startOfWeek.setDate(diffToMonday);
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        
+        const startStr = startOfWeek.toISOString().split('T')[0];
+        const endStr = endOfWeek.toISOString().split('T')[0];
+
         const [branchesRes, bookingsRes, patientsRes] = await Promise.all([
           supabase.from('branches').select('id, branch_name, total_machines').eq('status', 'Active'),
-          // Included booking_date to resolve the TypeScript error and enable travel logic
-          supabase.from('bookings').select('branch_id, patient_id, booking_status, booking_date, booking_session_time').neq('booking_status', 'Cancelled'),
+          // LOGIC FIX: Filter bookings to ONLY the current week to prevent chart bloat
+          supabase.from('bookings').select('branch_id, patient_id, booking_status, booking_date, booking_session_time')
+            .neq('booking_status', 'Cancelled')
+            .gte('booking_date', startStr)
+            .lte('booking_date', endStr),
           supabase.from('patients').select('patient_id, home_branch_id')
         ]);
 
@@ -24,44 +41,41 @@ export default function AdminDashboard() {
         const bookings = bookingsRes.data || [];
         const patients = patientsRes.data || [];
 
-        const todayStr = new Date().toISOString().split('T')[0];
-
-        // 1. Live Branch Occupancy & Cross-Branch Visits
+        // 1. Live Branch Occupancy & Cross-Branch Visits (FIXED MATH)
         let totalActiveTravelers = 0;
         
         const occupancyData = branches.map((branch) => {
-          // TRUE CAPACITY: 1 machine = 6 home patients (3 shifts * 2 cohorts: MWF/TTS)
-          const totalBranchCapacity = (branch.total_machines || 0) * 6;
+          // LOGIC FIX: Daily Capacity = 1 machine handles 3 shifts per day
+          const totalDailyCapacity = (branch.total_machines || 0) * 3;
           
           const homePatientsList = patients.filter(p => p.home_branch_id === branch.id);
-          const homePatientsCount = homePatientsList.length;
+          
+          // Look ONLY at bookings for THIS branch, happening TODAY
+          const todaysBookings = bookings.filter(b => b.branch_id === branch.id && b.booking_date === todayStr);
+          const totalUsedSlotsToday = todaysBookings.length;
 
-          // Travel Patients actively visiting THIS branch TODAY
-          const activeTravelersToday = bookings.filter(b => 
-            b.branch_id === branch.id && 
-            b.booking_date === todayStr &&
-            !homePatientsList.some(hp => hp.patient_id === b.patient_id) 
-          ).length;
+          // Split today's sessions into Home vs Travel Guests
+          const travelPatientsToday = todaysBookings.filter(b => !homePatientsList.some(hp => hp.patient_id === b.patient_id)).length;
+          const homePatientsToday = totalUsedSlotsToday - travelPatientsToday;
 
-          totalActiveTravelers += activeTravelersToday;
-          const totalUsedCapacity = homePatientsCount + activeTravelersToday;
+          totalActiveTravelers += travelPatientsToday;
 
-          const occupancy = totalBranchCapacity > 0 
-            ? Math.round((totalUsedCapacity / totalBranchCapacity) * 100) 
+          const occupancy = totalDailyCapacity > 0 
+            ? Math.round((totalUsedSlotsToday / totalDailyCapacity) * 100) 
             : 0;
 
           return {
             uniqueKey: branch.id || branch.branch_name, 
             name: branch.branch_name,
             occupancy,
-            homePatients: homePatientsCount,
-            travelPatients: activeTravelersToday,
-            totalSlots: totalBranchCapacity,
-            usedSlots: totalUsedCapacity
+            homePatients: homePatientsToday,
+            travelPatients: travelPatientsToday,
+            totalSlots: totalDailyCapacity,
+            usedSlots: totalUsedSlotsToday
           };
         });
 
-        // 2. Popular Session Times
+        // 2. Popular Session Times (Now accurately reflects THIS WEEK)
         let morning = 0, afternoon = 0, evening = 0;
         bookings.forEach(b => {
           const shift = b.booking_session_time?.toLowerCase();
@@ -71,7 +85,7 @@ export default function AdminDashboard() {
         });
         const maxSessionLoad = Math.max(morning, afternoon, evening, 1);
 
-        // 3. Weekly Patient Load
+        // 3. Weekly Patient Load (Now accurately scoped to THIS WEEK)
         const weeklyLoad = [0, 0, 0, 0, 0, 0, 0];
         bookings.forEach(b => {
           if (b.booking_date) {

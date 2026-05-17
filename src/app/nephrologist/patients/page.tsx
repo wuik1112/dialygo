@@ -112,6 +112,16 @@ export default function ClinicalPatientRecord() {
     setIsUploading(true);
 
     try {
+`     const { error: updateError } = await supabase
+        .from('patients')
+        .update({ 
+          serology_report_url: publicUrl,
+          serology_document_status: 'Verified',
+          last_serology_date: new Date().toISOString().split('T')[0],
+          travel_status: 'Active' // <-- ADD THIS LINE to restore eligibility
+        })
+        .eq('patient_id', selectedPatient.patient_id);
+        `
       const fileExt = file.name.split('.').pop();
       const fileName = `serology_${selectedPatient.patient_id}_${Date.now()}.${fileExt}`;
       const filePath = `${selectedPatient.patient_id}/${fileName}`;
@@ -182,6 +192,8 @@ export default function ClinicalPatientRecord() {
 
   if (isLoading) return <div className="p-8 text-center font-bold text-blue-600"><FiActivity className="animate-spin mx-auto text-3xl mb-2" /> Loading Clinical Workstation...</div>;
 
+  const isUndergoingDialysis = selectedPatient?.treatments?.some((t: any) => t.session_status === 'Ongoing');
+  
   return (
     <main className="p-8 max-w-[1600px] mx-auto flex gap-8 h-[calc(100vh-2rem)] print:p-0 print:m-0 print:h-auto">
       
@@ -300,12 +312,17 @@ export default function ClinicalPatientRecord() {
                       <h3 className="text-xl font-black text-slate-900 print:text-black">Official Dialysis Prescription</h3>
                       <p className="text-xs font-bold text-slate-500 mt-1 flex items-center gap-1 print:text-black"><FiShield className="text-emerald-500 print:hidden"/> Clinical Document</p>
                     </div>
+                    
                     <div className="flex gap-3 print:hidden">
                       <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
                         <FiPrinter /> Export PDF
                       </button>
                       
-                      {!isEditing ? (
+                      {isUndergoingDialysis ? (
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-700 rounded-xl font-bold text-sm border border-red-200">
+                           <FiAlertCircle /> Locked: Active Dialysis in Progress
+                        </div>
+                      ) : !isEditing ? (
                         <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md shadow-blue-200">
                           <FiEdit2 /> Modify Parameters
                         </button>

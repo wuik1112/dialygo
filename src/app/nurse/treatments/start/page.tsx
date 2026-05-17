@@ -16,7 +16,7 @@ function StartTreatmentContent() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+  const [hasActiveSession, setHasActiveSession] = useState(false);
   const [patient, setPatient] = useState<any>(null);
   const [prescription, setPrescription] = useState<any>(null);
   const [booking, setBooking] = useState<any>(null);
@@ -37,6 +37,10 @@ function StartTreatmentContent() {
         const { data: session } = await supabase.auth.getSession();
         if (!session.session) return;
 
+        const { data: activeTx } = await supabase.from('treatments').select('session_id').eq('patient_id', patientId).eq('session_status', 'Ongoing').maybeSingle();
+        if (activeTx) {
+          setHasActiveSession(true);
+        }
         const { data: userData } = await supabase.from('users').select('user_id, branch_id').eq('user_email', session.session.user.email).single();
         setNurseData(userData);
 
@@ -203,6 +207,14 @@ function StartTreatmentContent() {
                 <p className="font-black text-xl text-slate-900">{prescription?.heparin_dosage || 0} <span className="text-sm font-bold text-slate-500">IU</span></p>
               </div>
               
+              <button 
+                onClick={handleStartSession} 
+                type="button" 
+                disabled={isSubmitting || !isFormValid || hasAbnormalVitals || hasActiveSession} 
+                className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 flex justify-center items-center gap-2 shadow-lg shadow-blue-900/50 transition-all"
+              >
+                {hasActiveSession ? 'Session Already Ongoing' : isSubmitting ? 'Processing Start...' : <><FiPlayCircle className="text-xl" /> Commence Treatment</>}
+              </button>
               <div className="pt-4 border-t border-slate-100 col-span-2 sm:col-span-3 md:col-span-4 grid grid-cols-2 sm:grid-cols-3 gap-6">
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase mb-1" title="Blood Flow Rate">Target Qb</p>
