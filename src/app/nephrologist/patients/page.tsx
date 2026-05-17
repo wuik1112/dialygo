@@ -14,6 +14,7 @@ export default function ClinicalPatientRecord() {
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [serologyDate, setSerologyDate] = useState('');
   const [nephrologistId, setNephrologistId] = useState<number | null>(null);
 
   // Filtering States
@@ -47,12 +48,9 @@ export default function ClinicalPatientRecord() {
     
     setNephrologistId(user.user_id);
 
-    // 1. Fetch All Branches for the Filter Dropdown
     const { data: branchData } = await supabase.from('branches').select('id, branch_name');
     if (branchData) setBranches(branchData);
 
-    // 2. Fetch ALL Patients (Global View), removing the branch_id constraint
-    // FIXED DATABASE ERROR: patients table doesn't have 'created_at', ordering by patient_id instead.
     const { data: allPatients, error: patientError } = await supabase
       .from('patients')
       .select(`
@@ -66,7 +64,6 @@ export default function ClinicalPatientRecord() {
 
     if (patientError) console.error("Error fetching patients:", patientError);
 
-    // 3. Process Rx Status for filtering
     const processedPatients = allPatients?.map(p => {
       const activeRx = Array.isArray(p.prescriptions) ? p.prescriptions.find((rx: any) => rx.status === 'Active') : null;
       return { ...p, rxStatus: activeRx ? 'Active' : 'Missing/Expired' };
@@ -81,6 +78,7 @@ export default function ClinicalPatientRecord() {
   const handleSelectPatient = (patient: any) => {
     setSelectedPatient(patient);
     setIsEditing(false);
+    setSerologyDate(''); // Reset date picker when changing patients
     const rx = patient.prescriptions?.find((p: any) => p.status === 'Active');
     if (rx) {
       setRxForm({
@@ -108,20 +106,17 @@ export default function ClinicalPatientRecord() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !selectedPatient) return;
+    
+    // Clinical Safety Check for Test Date
+    if (!serologyDate) {
+      alert("Clinical Error: Please input the actual Serology Test Date from the lab report before uploading the document.");
+      return;
+    }
+
     const file = e.target.files[0];
     setIsUploading(true);
 
     try {
-`     const { error: updateError } = await supabase
-        .from('patients')
-        .update({ 
-          serology_report_url: publicUrl,
-          serology_document_status: 'Verified',
-          last_serology_date: new Date().toISOString().split('T')[0],
-          travel_status: 'Active' // <-- ADD THIS LINE to restore eligibility
-        })
-        .eq('patient_id', selectedPatient.patient_id);
-        `
       const fileExt = file.name.split('.').pop();
       const fileName = `serology_${selectedPatient.patient_id}_${Date.now()}.${fileExt}`;
       const filePath = `${selectedPatient.patient_id}/${fileName}`;
@@ -131,20 +126,23 @@ export default function ClinicalPatientRecord() {
 
       const { data: { publicUrl } } = supabase.storage.from('patient_documents').getPublicUrl(filePath);
 
+      // Update Database: Restores Travel Eligibility and sets correct Lab Date
       const { error: updateError } = await supabase
         .from('patients')
         .update({ 
           serology_report_url: publicUrl,
           serology_document_status: 'Verified',
-          last_serology_date: new Date().toISOString().split('T')[0]
+          last_serology_date: serologyDate, 
+          travel_status: 'Active'
         })
         .eq('patient_id', selectedPatient.patient_id);
 
       if (updateError) throw updateError;
 
-      alert("Serology report uploaded to patient_documents successfully!");
+      alert("Serology report uploaded and travel eligibility restored!");
       fetchClinicalData();
-      setSelectedPatient({...selectedPatient, serology_report_url: publicUrl});
+      setSelectedPatient({...selectedPatient, serology_report_url: publicUrl, last_serology_date: serologyDate, travel_status: 'Active'});
+      setSerologyDate(''); // Reset input
     } catch (err: any) {
       alert("Upload failed: " + err.message);
     } finally {
@@ -155,11 +153,30 @@ export default function ClinicalPatientRecord() {
   const handleSavePrescription = async () => {
     if (!selectedPatient || !nephrologistId) return;
 
+    // --- NEW: CLINICAL SAFETY RANGE VALIDATION ---
+    const checkKtv = parseFloat(rxForm.target_ktv);
+    const checkWeight = parseFloat(rxForm.target_dry_weight);
+    const checkDuration = parseInt(rxForm.target_duration);
+
+    if (checkKtv < 0.8 || checkKtv > 2.5) {
+      alert("Clinical Warning: Target Kt/V is outside safety limits (0.8 - 2.5). Please confirm or correct.");
+      return;
+    }
+    if (checkWeight < 20 || checkWeight > 250) {
+      alert("Clinical Warning: Target Dry Weight is outside standard human safety limits. Please verify.");
+      return;
+    }
+    if (checkDuration < 120 || checkDuration > 480) {
+      alert("Clinical Warning: Target Duration is outside safety limits (120 - 480 mins). Please verify.");
+      return;
+    }
+    // ---------------------------------------------
+
     const payload = {
       patient_id: selectedPatient.patient_id,
       nephrologist_id: nephrologistId,
       ...rxForm,
-      target_dry_weight: parseFloat(rxForm.target_dry_weight),
+      target_dry_weight: checkWeight,
       updated_at: new Date().toISOString(),
       status: 'Active' 
     };
@@ -182,7 +199,6 @@ export default function ClinicalPatientRecord() {
 
   const handlePrint = () => window.print();
 
-  // --- FILTERING LOGIC ---
   const filteredPatients = patients.filter(patient => {
     const matchesSearch = patient.users?.user_fullname.toLowerCase().includes(searchTerm.toLowerCase()) || patient.users?.user_ic.includes(searchTerm);
     const matchesBranch = branchFilter === 'All' || patient.home_branch_id?.toString() === branchFilter;
@@ -192,12 +208,13 @@ export default function ClinicalPatientRecord() {
 
   if (isLoading) return <div className="p-8 text-center font-bold text-blue-600"><FiActivity className="animate-spin mx-auto text-3xl mb-2" /> Loading Clinical Workstation...</div>;
 
+  // SAFETY LOCK: Check if patient is currently plugged into a machine
   const isUndergoingDialysis = selectedPatient?.treatments?.some((t: any) => t.session_status === 'Ongoing');
   
   return (
     <main className="p-8 max-w-[1600px] mx-auto flex gap-8 h-[calc(100vh-2rem)] print:p-0 print:m-0 print:h-auto">
       
-      {/* DIRECTORY SIDEBAR (With Embedded Filters) */}
+      {/* DIRECTORY SIDEBAR */}
       <div className="w-1/4 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden print:hidden min-w-[320px]">
         <div className="p-5 border-b border-slate-100 bg-slate-50 space-y-3">
           <h3 className="font-black text-slate-900 text-sm uppercase tracking-tighter flex items-center justify-between">
@@ -318,6 +335,7 @@ export default function ClinicalPatientRecord() {
                         <FiPrinter /> Export PDF
                       </button>
                       
+                      {/* ACTIVE DIALYSIS LOCK IMPLEMENTATION */}
                       {isUndergoingDialysis ? (
                         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-700 rounded-xl font-bold text-sm border border-red-200">
                            <FiAlertCircle /> Locked: Active Dialysis in Progress
@@ -457,17 +475,31 @@ export default function ClinicalPatientRecord() {
                       <h4 className="font-black text-blue-900 flex items-center gap-2 mb-1"><FiFileText /> Lab & Serology Reports</h4>
                       <p className="text-xs text-blue-700 font-medium">Status: {selectedPatient.serology_document_status || 'Missing'}</p>
                     </div>
-                    <div className="flex gap-2">
+                    
+                    {/* IMPLEMENTED: Date Picker and Upload Group */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex flex-col">
+                        <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-1">Actual Lab Date</label>
+                        <input 
+                          type="date" 
+                          max={new Date().toISOString().split("T")[0]} 
+                          value={serologyDate} 
+                          onChange={(e) => setSerologyDate(e.target.value)} 
+                          className="px-3 py-2 text-xs font-bold text-slate-700 rounded-xl border border-blue-200 outline-none focus:border-blue-500"
+                        />
+                      </div>
+
                       {selectedPatient.serology_report_url && (
-                        <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-50 flex items-center gap-2 transition-colors">
+                        <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="mt-5 text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-50 flex items-center gap-2 transition-colors">
                           <FiCheckCircle /> View Active File
                         </a>
                       )}
+                      
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
                       <button 
-                        disabled={isUploading}
+                        disabled={isUploading || !serologyDate} 
                         onClick={() => fileInputRef.current?.click()}
-                        className="text-xs px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-blue-400"
+                        className="mt-5 text-xs px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-blue-300 disabled:cursor-not-allowed"
                       >
                         {isUploading ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
                         {selectedPatient.serology_report_url ? "Update Document" : "Upload Document"}

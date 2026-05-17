@@ -1,10 +1,7 @@
-// 
-
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
-import Link from 'next/link';
-import { FiActivity, FiCheckCircle, FiXCircle, FiAlertTriangle } from 'react-icons/fi';
+import { FiActivity, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
   const year = d.getFullYear();
@@ -70,19 +67,6 @@ export default function ManagerWeeklyRoster() {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- NEW: Simulated Pending Leave Requests Inbox ---
-  const [pendingLeaves, setPendingLeaves] = useState([
-    {
-      id: 1,
-      doctorId: 1001, // Dummy ID for Nephrologist
-      doctorName: 'Dr. Ahmad Bin Bakar',
-      startDate: '2026-05-12',
-      endDate: '2026-05-15',
-      leaveType: 'Medical Conference',
-      coveringDoctor: 'Dr. Lim (Ext. 402)'
-    }
-  ]);
-
   const fetchData = async () => {
     setIsLoading(true);
     try {
@@ -137,47 +121,6 @@ export default function ManagerWeeklyRoster() {
   };
 
   useEffect(() => { fetchData(); }, [currentWeekStart, currentMonth]);
-
-  // --- NEW: Safety Protocol Approval Logic ---
-  const handleApproveLeave = async (reqId: number, doctorId: number, doctorName: string, startDate: string, endDate: string, coveringDoctor: string) => {
-    try {
-      // 1. Update the Roster Table
-      await supabase
-        .from('staff_roster')
-        .update({ shift_type: 'ANNUAL_LEAVE', remarks: `Covering: ${coveringDoctor}` })
-        .eq('nurse_id', doctorId) // Note: your schema uses nurse_id for all staff IDs
-        .gte('shift_date', startDate)
-        .lte('shift_date', endDate);
-
-      // 2. Blast Safety Notification to all Nurses in the branch
-      if (nurses.length > 0) {
-        const nurseNotifications = nurses.map(nurse => ({
-          user_id: nurse.user_id,
-          title: '🚨 CLINICAL COVERAGE UPDATE',
-          message: `${doctorName} is on leave from ${startDate} to ${endDate}. For clinical escalations, please route to ${coveringDoctor}.`,
-          type: 'System'
-        }));
-        await supabase.from('notifications').insert(nurseNotifications);
-      }
-      
-      // 3. Notify the Doctor
-      await supabase.from('notifications').insert({
-        user_id: doctorId,
-        title: 'Leave Approved',
-        message: `Your leave for ${startDate} to ${endDate} has been approved. The nursing team has been notified.`,
-        type: 'System'
-      });
-
-      alert(`Leave approved! ${nurses.length} nurses have been notified of the coverage plan.`);
-      
-      // Remove from pending list
-      setPendingLeaves(prev => prev.filter(req => req.id !== reqId));
-      fetchData(); // Refresh the roster view
-
-    } catch (err: any) {
-      alert("Error approving leave: " + err.message);
-    }
-  };
 
   const handleEmptyCellClick = (nurseId: number, dateStr: string) => {
     const isSunday = parseDateLocal(dateStr).getDay() === 0;
@@ -416,13 +359,15 @@ export default function ManagerWeeklyRoster() {
     setCurrentWeekStart(getMonday(date));
     setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
   };
-if (isLoading && !branchData) {
+
+  if (isLoading && !branchData) {
     return (
       <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
         <div className='flex flex-col items-center text-blue-600 font-bold'><FiActivity className='text-4xl mb-4 animate-spin' /><span>Loading Duty Roster...</span></div>
       </div>
     );
   }
+
   const getShiftStyles = (type: string, isForeignBranch: boolean = false) => {
     if (isForeignBranch) return 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300';
     switch(type) {
@@ -442,43 +387,6 @@ if (isLoading && !branchData) {
             <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Staff Schedule</h1>
           </div>
         </div>
-
-        {/* --- NEW: PENDING LEAVES INBOX --- */}
-        {pendingLeaves.length > 0 && (
-          <div className="mb-8 animate-in slide-in-from-top-2">
-            <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <FiAlertTriangle className="text-amber-500" /> Pending Clinical Leave Requests
-            </h2>
-            <div className="flex flex-col gap-4">
-              {pendingLeaves.map(req => (
-                <div key={req.id} className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5 flex items-center justify-between border-l-4 border-l-amber-500">
-                  <div className="flex items-start gap-4">
-                    <div className="h-10 w-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center font-black shrink-0">DR</div>
-                    <div>
-                      <h3 className="font-black text-slate-900">{req.doctorName}</h3>
-                      <p className="text-xs font-bold text-slate-500 mt-1">
-                        {req.leaveType} • <span className="text-slate-800">{req.startDate} to {req.endDate}</span>
-                      </p>
-                      <p className="text-xs font-bold text-blue-600 mt-1 bg-blue-50 inline-block px-2 py-0.5 rounded">
-                        Coverage: {req.coveringDoctor}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-2">
-                    <button onClick={() => setPendingLeaves(prev => prev.filter(p => p.id !== req.id))} className="px-4 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-colors">Decline</button>
-                    <button 
-                      onClick={() => handleApproveLeave(req.id, req.doctorId, req.doctorName, req.startDate, req.endDate, req.coveringDoctor)} 
-                      className="px-4 py-2 bg-amber-500 text-white font-bold rounded-lg text-xs hover:bg-amber-600 shadow-md transition-colors"
-                    >
-                      Approve & Notify Nurses
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* MONTHLY WIDGET */}
         <div className='bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-8'>
@@ -662,7 +570,6 @@ if (isLoading && !branchData) {
                 </div>
               )}
 
-              {/* NEW CLINICAL BLOCK */}
               {formData.shift_type === 'WORK' && (
                 <div className='p-5 bg-blue-50/50 border border-blue-100 rounded-xl space-y-4 animate-in slide-in-from-top-2'>
                   <div className='grid grid-cols-2 gap-4'>

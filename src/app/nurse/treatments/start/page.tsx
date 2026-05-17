@@ -186,7 +186,11 @@ function StartTreatmentContent() {
               <h3 className="text-sm font-black text-blue-800 flex items-center gap-2">
                 <FiShield className="text-blue-500" /> Active Nephrologist Prescription
               </h3>
-              <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest px-2 py-1 bg-blue-100 rounded-md">Verified</span>
+              {prescription ? (
+                <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest px-2 py-1 bg-blue-100 rounded-md">Verified</span>
+              ) : (
+                <span className="text-[10px] font-black text-red-600 uppercase tracking-widest px-2 py-1 bg-red-100 rounded-md border border-red-200">Missing</span>
+              )}
             </div>
             
             <div className="p-6 md:p-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
@@ -291,7 +295,6 @@ function StartTreatmentContent() {
               )}
             </div>
 
-            {/* SEBELUM VITALS */}
             <div className={`p-4 rounded-2xl border transition-colors ${hasAbnormalVitals ? 'bg-red-900/20 border-red-500/50' : 'bg-slate-800 border-slate-700'}`}>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
                 <span>Pre-Weight (kg)</span>
@@ -325,7 +328,7 @@ function StartTreatmentContent() {
             <div className="mt-6 space-y-3">
               {hasAbnormalVitals && (
                 <p className="text-[10px] font-bold text-red-400 uppercase text-center animate-pulse flex items-center justify-center gap-1">
-                  <FiAlertTriangle /> Vitals exceed safe limits. Contact Doctor.
+                  <FiAlertTriangle /> Vitals exceed safe limits.
                 </p>
               )}
               {!isMachineAssigned && (
@@ -333,14 +336,19 @@ function StartTreatmentContent() {
                   Cannot start without machine assignment.
                 </p>
               )}
+              {!prescription && (
+                <p className="text-[10px] font-bold text-red-400 uppercase text-center flex items-center justify-center gap-1">
+                  <FiAlertTriangle /> Cannot start session. Valid prescription required.
+                </p>
+              )}
               
               <button 
                 onClick={handleStartSession} 
                 type="button" 
-                disabled={isSubmitting || !isFormValid || hasAbnormalVitals} 
+                disabled={isSubmitting || !isFormValid || hasAbnormalVitals || hasActiveSession || !prescription} 
                 className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 flex justify-center items-center gap-2 shadow-lg shadow-blue-900/50 transition-all"
               >
-                {isSubmitting && !hasAbnormalVitals ? 'Processing Start...' : <><FiPlayCircle className="text-xl" /> Commence Treatment</>}
+                {hasActiveSession ? 'Session Already Ongoing' : (!prescription ? 'Missing Prescription' : (isSubmitting ? 'Processing Start...' : <><FiPlayCircle className="text-xl" /> Commence Treatment</>))}
               </button>
             </div>
           </form>

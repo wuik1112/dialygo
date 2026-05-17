@@ -29,7 +29,7 @@ export default function PatientSearchBooking() {
   const [isLoading, setIsLoading] = useState(true);
   const [branches, setBranches] = useState<any[]>([]);
   const [filteredBranches, setFilteredBranches] = useState<any[]>([]);
-  
+  const [userId, setUserId] = useState<number | null>(null);
   const [patientId, setPatientId] = useState<number | null>(null);
   const [patientHomeBranchId, setPatientHomeBranchId] = useState<number | null>(null);
   const [patientRecord, setPatientRecord] = useState<any>(null);
@@ -53,22 +53,25 @@ export default function PatientSearchBooking() {
     libraries: libraries,
   });
 
-  // --- BRANCH & BOOKING STATES ---
+  // --- DYNAMIC BOOKING RULES STATE ---
+  const [advanceNoticeDays, setAdvanceNoticeDays] = useState(14);
+  const [minDateString, setMinDateString] = useState('');
+  
+  // --- BOOKING STATES ---
   const [selectedBranch, setSelectedBranch] = useState<any>(null);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [showZoom, setShowZoom] = useState(false);
-  
-  const minAllowedDate = new Date();
-  minAllowedDate.setDate(minAllowedDate.getDate() + 14);
-  const minDateString = minAllowedDate.toISOString().split('T')[0];
 
-  const [draftDate, setDraftDate] = useState(minDateString);
+  const [draftDate, setDraftDate] = useState('');
   const [draftShift, setDraftShift] = useState('');
   const [selectedSessions, setSelectedSessions] = useState<{date: string, shift: string}[]>([]);
   const [showReviewScreen, setShowReviewScreen] = useState(false);
 
+  // --- ADVANCED BOOKING STATES (Locks & Conflicts) ---
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [lockedBookings, setLockedBookings] = useState<any[]>([]);
+  const [homeConflicts, setHomeConflicts] = useState<string[]>([]);
 
   const [morningSlots, setMorningSlots] = useState(0);
   const [afternoonSlots, setAfternoonSlots] = useState(0);
@@ -92,6 +95,7 @@ export default function PatientSearchBooking() {
         const { data: user } = await supabase.from('users').select('user_id').eq('user_email', email).single();
         
         if (user) {
+          setUserId(user.user_id);
           const { data: patient } = await supabase
             .from('patients')
             .select('*')
@@ -108,6 +112,24 @@ export default function PatientSearchBooking() {
         const { data: branchData } = await supabase.from('branches').select('*').order('branch_name', { ascending: true });
         setBranches(branchData || []);
         setFilteredBranches(branchData || []);
+
+        const { data: rulesData } = await supabase.from('rules').select('*');
+        let advanceDays = 14; 
+        if (rulesData) {
+          const advanceRule = rulesData.find(r => r.rule_name === 'Advance Booking Window');
+          if (advanceRule && advanceRule.rule_value) {
+            advanceDays = parseInt(advanceRule.rule_value);
+          }
+        }
+        
+        setAdvanceNoticeDays(advanceDays);
+        const dynamicMinDate = new Date();
+        dynamicMinDate.setDate(dynamicMinDate.getDate() + advanceDays);
+        const formattedMin = dynamicMinDate.toISOString().split('T')[0];
+        
+        setMinDateString(formattedMin);
+        setDraftDate(formattedMin);
+
       } catch (err) {
         console.error("Failed to load branches");
       } finally {
@@ -244,7 +266,6 @@ export default function PatientSearchBooking() {
     setShowFilters(false);
   };
 
-  // Listen to search term changes live
   useEffect(() => {
     applyFiltersOnList(branches);
   }, [searchTerm]);
@@ -263,7 +284,8 @@ export default function PatientSearchBooking() {
   // --- BOOKING LOGIC ---
   useEffect(() => {
     if (!selectedBranch) {
-      setCurrentPhotoIndex(0); setShowZoom(false); setDraftDate(minDateString);
+      setCurrentPhotoIndex(0); setShowZoom(false); 
+      setDraftDate(minDateString);
       setDraftShift(''); setSelectedSessions([]); setShowReviewScreen(false);
     }
   }, [selectedBranch, minDateString]);
@@ -347,13 +369,17 @@ export default function PatientSearchBooking() {
     setSelectedSessions(selectedSessions.filter(s => s.date !== dateToRemove));
   };
 
-  const handleFinalSubmit = async () => {
-    if (selectedSessions.length === 0) return; 
+  // =========================================================
+  // STEP 1: PESSIMISTIC LOCKING & HOME CONFLICT DETECTION
+  // =========================================================
+  const handleProceedToReview = async () => {
+    if (selectedSessions.length === 0) return;
     setIsSubmitting(true);
-    
+
     try {
       const maxCapacity = selectedBranch.available_slots > 0 ? selectedBranch.available_slots : selectedBranch.total_machines || 8;
 
+      // 1. Concurrency Check before Locking
       for (const session of selectedSessions) {
         const shiftKeyword = session.shift.includes('Morning') ? 'Morning' : session.shift.includes('Afternoon') ? 'Afternoon' : 'Evening';
         const { data: existingBookings, error: checkError } = await supabase
@@ -368,27 +394,117 @@ export default function PatientSearchBooking() {
         const currentBookingsCount = existingBookings ? existingBookings.length : 0;
 
         if (currentBookingsCount >= maxCapacity) {
-          alert(`Sorry, the ${shiftKeyword} slot for ${session.date} was just taken by another user. Please remove it from your cart and select another date.`);
+          alert(`Concurrency Alert: The ${shiftKeyword} slot for ${session.date} was just taken by another user. Please remove it from your cart and select another date.`);
           setIsSubmitting(false); 
           return; 
         }
       }
 
+      // 2. Acquire Temporary Lock 
       const inserts = selectedSessions.map(session => ({
         patient_id: patientId,
         branch_id: selectedBranch.id,
         booking_date: session.date,
         booking_session_time: session.shift,
         booking_type: 'Travel',
-        booking_status: 'Pending Approval'
+        booking_status: 'Locked_Temporary'
       }));
 
-      const { error } = await supabase.from('bookings').insert(inserts);
+      const { data: lockedData, error: lockError } = await supabase.from('bookings').insert(inserts).select();
+      if (lockError) throw lockError;
+      setLockedBookings(lockedData || []);
+
+      // 3. Home Schedule Conflict Check
+      const { data: existingHomeBookings } = await supabase
+        .from('bookings')
+        .select('booking_date')
+        .eq('patient_id', patientId)
+        .eq('booking_type', 'Home')
+        .neq('booking_status', 'Cancelled');
+
+      const explicitHomeDates = existingHomeBookings?.map(b => b.booking_date) || [];
+      const pattern = patientRecord?.schedule_pattern;
+
+      const conflicts = selectedSessions.filter(s => {
+        const isExplicit = explicitHomeDates.includes(s.date);
+        const d = new Date(s.date);
+        const dow = d.getDay();
+        const isMWF = pattern === 'MWF' && [1, 3, 5].includes(dow);
+        const isTTS = pattern === 'TTS' && [2, 4, 6].includes(dow);
+        return isExplicit || isMWF || isTTS;
+      }).map(s => new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
+      
+      setHomeConflicts([...new Set(conflicts)]);
+      setShowReviewScreen(true);
+      
+    } catch (err: any) {
+      alert(`Failed to secure slots: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // =========================================================
+  // STEP 2: RELEASE LOCK
+  // =========================================================
+  const handleCancelReview = async () => {
+    const lockedIds = lockedBookings.map(b => b.id);
+    if (lockedIds.length > 0) {
+      await supabase.from('bookings').delete().in('id', lockedIds); 
+    }
+    setLockedBookings([]);
+    setShowReviewScreen(false);
+  };
+
+  // =========================================================
+  // STEP 3: FINALIZE BOOKING
+  // =========================================================
+  const handleFinalSubmit = async () => {
+    setIsSubmitting(true);
+    try {
+      const lockedIds = lockedBookings.map(b => b.id);
+      
+      const { error } = await supabase
+        .from('bookings')
+        .update({ booking_status: 'Pending Approval' })
+        .in('id', lockedIds);
+
       if (error) throw error;
+
+      // --- NEW: IN-APP NOTIFICATION ROUTING ---
+      if (userId) {
+        // 1. Notify the Patient
+        await supabase.from('notifications').insert({
+          user_id: userId,
+          title: 'Travel Request Submitted',
+          message: `Your booking request to ${selectedBranch.branch_name} has been submitted and is pending manager approval.`
+        });
+      }
+
+      // 2. Fetch Target Branch Staff (Role 3 = Manager, Role 4 = Nurse)
+      const { data: staff } = await supabase
+        .from('users')
+        .select('user_id, role_id')
+        .eq('branch_id', selectedBranch.id)
+        .in('role_id', [3, 4]);
+
+      // 3. Blast Notifications to Staff
+      if (staff && staff.length > 0) {
+        const staffNotifs = staff.map(s => ({
+          user_id: s.user_id,
+          title: s.role_id === 3 ? 'Action Required: New Guest Booking' : 'Notice: Upcoming Guest Patient',
+          message: s.role_id === 3
+            ? `A new travel booking from ${patientRecord?.users?.user_fullname || 'a patient'} requires your approval.`
+            : `A new travel patient has requested a session at your branch. Pending manager review.`
+        }));
+        await supabase.from('notifications').insert(staffNotifs);
+      }
+      // ----------------------------------------
       
       setShowSuccessDialog(true);
+      setLockedBookings([]); 
     } catch (err: any) { 
-      alert(`Failed to submit request: ${err.message || "Unknown error"}`); 
+      alert(`Failed to submit request: ${err.message}`); 
     } finally { 
       setIsSubmitting(false); 
     }
@@ -424,7 +540,6 @@ export default function PatientSearchBooking() {
           <div className='bg-white px-5 pt-12 pb-4 shadow-sm z-10 shrink-0'>
             <h1 className='text-xl font-black text-slate-800 tracking-tight mb-4'>Search Dialysis Centre</h1>
             
-            {/* GOOGLE MAPS AUTOCOMPLETE DROPDOWN */}
             <div className='mb-3 relative'>
               {isLoaded && !loadError ? (
                 <Autocomplete onLoad={onLoad} onPlaceChanged={onPlaceChanged}>
@@ -452,7 +567,6 @@ export default function PatientSearchBooking() {
               )}
             </div>
 
-            {/* NAME SEARCH AND FILTER TOGGLE */}
             <div className='flex gap-2'>
               <div className='relative flex-1'>
                 <FiSearch className='absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg' />
@@ -463,7 +577,6 @@ export default function PatientSearchBooking() {
               </button>
             </div>
 
-            {/* FILTER DROPDOWN */}
             {showFilters && (
               <div className='mt-4 pt-4 border-t border-slate-100 animate-in slide-in-from-top-2 max-h-[60vh] overflow-y-auto custom-scrollbar'>
                 <div className='flex justify-between items-center mb-4'>
@@ -518,20 +631,18 @@ export default function PatientSearchBooking() {
           <div className='flex-1 overflow-y-auto p-5 pb-24 space-y-4 custom-scrollbar'>
             <div className='flex justify-between items-end mb-2'>
               <h2 className='text-sm font-bold text-slate-500 uppercase tracking-widest'>Results</h2>
-              {hasSearchedLocation && <span className='text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full'>Sorted by Driving Distance</span>}
+              {hasSearchedLocation && <span className='text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full'>Sorted by Distance</span>}
             </div>
             
             {isCalculating ? (
               <div className='py-12 flex flex-col items-center justify-center text-center'>
                 <FiActivity className='text-3xl text-blue-500 animate-spin mb-4' />
                 <p className='font-bold text-slate-700'>Calculating routes...</p>
-                <p className='text-xs text-slate-400 mt-1'>Finding the fastest driving paths.</p>
               </div>
             ) : filteredBranches.length === 0 ? (
               <div className='py-12 flex flex-col items-center justify-center text-center opacity-60'>
                 <FiSearch className='text-4xl text-slate-400 mb-4' />
                 <p className='font-bold text-slate-700'>No clinics found</p>
-                <p className='text-xs text-slate-500 mt-1'>Try adjusting your search terms.</p>
               </div>
             ) : (
               filteredBranches.map(branch => {
@@ -546,7 +657,6 @@ export default function PatientSearchBooking() {
                         <div className='w-full h-full flex items-center justify-center text-slate-400'>Photo</div>
                       )}
                       
-                      {/* DRIVING DISTANCE BADGE */}
                       <div className='absolute top-3 left-3 flex flex-col gap-1'>
                         {branch.distanceText && branch.distanceText !== 'N/A' && (
                           <div className='bg-black/70 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-2 shadow-sm'>
@@ -612,7 +722,6 @@ export default function PatientSearchBooking() {
 
           <div className='flex-1 overflow-y-auto pb-safe custom-scrollbar'>
             
-            {/* Gallery */}
             <div className='h-56 bg-slate-900 w-full relative overflow-hidden group'>
               {uniquePhotos.length > 0 ? (
                 <>
@@ -625,12 +734,6 @@ export default function PatientSearchBooking() {
                     <button onClick={() => setShowZoom(true)} className='flex-1 h-full flex flex-col items-center justify-center opacity-0 hover:opacity-100 transition-opacity z-10'><div className='bg-black/40 p-3 rounded-full text-white backdrop-blur-sm shadow-xl'><FiMaximize2 className='text-2xl' /></div></button>
                     <button onClick={nextPhoto} className='w-1/4 h-full flex items-center justify-end pr-2 text-white/0 hover:text-white/80 transition-colors z-10'>{uniquePhotos.length > 1 && <FiChevronRight className='text-3xl drop-shadow-lg' />}</button>
                   </div>
-
-                  {uniquePhotos.length > 1 && (
-                    <div className='absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 shadow-sm z-10'>
-                      {uniquePhotos.map((_, i) => <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentPhotoIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'}`} />)}
-                    </div>
-                  )}
                 </>
               ) : (
                 <div className='w-full h-full flex items-center justify-center text-slate-500 font-bold'>No Photos Available</div>
@@ -642,12 +745,9 @@ export default function PatientSearchBooking() {
               <p className='text-sm text-slate-500 mt-2 leading-relaxed'>{selectedBranch.branch_address}</p>
               
               <div className='flex justify-between items-center mt-2'>
-                <button type="button" onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(selectedBranch.branch_name + ' ' + selectedBranch.branch_address)}`, '_blank')} className='text-blue-600 text-sm font-bold flex items-center gap-1 hover:text-blue-800 transition-colors'>
-  <FiMapPin /> View map
-</button>
-                {selectedBranch.distanceText && selectedBranch.distanceText !== 'N/A' && (
-                  <span className='text-xs font-bold text-slate-400'>{selectedBranch.durationText} drive ({selectedBranch.distanceText})</span>
-                )}
+                <button type="button" onClick={() => window.open(`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(selectedBranch.branch_name + ' ' + selectedBranch.branch_address)}`, '_blank')} className='text-blue-600 text-sm font-bold flex items-center gap-1 hover:text-blue-800 transition-colors'>
+                  <FiMapPin /> View map
+                </button>
               </div>
 
               <div className='mt-6 border-t border-slate-100 pt-4'>
@@ -657,24 +757,9 @@ export default function PatientSearchBooking() {
                   <p className='text-xs font-bold text-blue-600 uppercase tracking-widest mb-1'>Estimated Session Cost</p>
                   <p className='text-lg font-black text-slate-800'>{selectedBranch.session_price ? `RM ${selectedBranch.session_price}` : 'TBC'}</p>
                 </div>
-
-                <div className='flex flex-wrap gap-2 mb-4'>
-                  {selectedBranch.amenities && selectedBranch.amenities.length > 0 ? (
-                    selectedBranch.amenities.map((amn: string, idx: number) => (
-                      <span key={idx} className='bg-slate-50 text-slate-600 border border-slate-200 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5'>
-                        {renderFacilityIcon(amn, "text-blue-500")}
-                        {amn}
-                      </span>
-                    ))
-                  ) : (
-                    <span className='text-sm text-slate-400'>Standard clinical facilities</span>
-                  )}
-                </div>
-                <p className='text-sm font-bold text-slate-700 flex items-center gap-2'><FiUsers className='text-blue-500' /> Staff capacity: {selectedBranch.total_machines || 8}</p>
               </div>
             </div>
 
-            {/* CART PREVIEW WIDGET */}
             {selectedSessions.length > 0 && (
               <div className='px-5 py-4 bg-slate-800 text-white mx-5 mt-4 mb-2 rounded-2xl shadow-lg'>
                 <div className='flex justify-between items-center mb-3'>
@@ -692,8 +777,8 @@ export default function PatientSearchBooking() {
                     </div>
                   ))}
                 </div>
-                <button onClick={() => setShowReviewScreen(true)} className='w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-500 transition-colors'>
-                  Proceed to Review
+                <button onClick={handleProceedToReview} disabled={isSubmitting} className='w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-500 transition-colors'>
+                  {isSubmitting ? 'Securing Slots...' : 'Proceed to Review'}
                 </button>
               </div>
             )}
@@ -704,7 +789,6 @@ export default function PatientSearchBooking() {
                 {isCheckingSlots && <span className='text-[10px] font-bold text-blue-500 animate-pulse bg-blue-50 px-2 py-1 rounded-full'>Updating...</span>}
               </div>
 
-              {/* UNIVERSAL MACHINE MATCHER WARNING */}
               {patientMachine && (
                 <div className={`mb-5 p-4 rounded-xl border flex items-start gap-3 ${isMachineMatch ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                   {isMachineMatch ? <FiCheckCircle className='text-emerald-600 text-xl shrink-0 mt-0.5' /> : <FiAlertCircle className='text-amber-600 text-xl shrink-0 mt-0.5' />}
@@ -714,8 +798,8 @@ export default function PatientSearchBooking() {
                     </h4>
                     <p className={`text-xs font-bold mt-1 leading-relaxed ${isMachineMatch ? 'text-emerald-700' : 'text-amber-700'}`}>
                       {isMachineMatch 
-                        ? `This centre operates your preferred ${patientMachine} machines. Your prescription can be transferred seamlessly.` 
-                        : `You normally use ${patientMachine}, but this centre operates ${branchMachines.join(', ')}. The Head Nurse will need to review and adjust your prescription upon arrival.`}
+                        ? `This centre operates your preferred ${patientMachine} machines.` 
+                        : `You normally use ${patientMachine}, but this centre operates ${branchMachines.join(', ')}. The Head Nurse will adjust your prescription upon arrival.`}
                     </p>
                   </div>
                 </div>
@@ -727,7 +811,7 @@ export default function PatientSearchBooking() {
                   <div>
                     <h4 className='text-sm font-black text-red-800'>Date Invalid</h4>
                     <p className='text-xs font-bold text-red-600 mt-1 leading-relaxed'>
-                      Your Serology report expires (or expired) on <strong>{expiryDateString}</strong>, which is before your selected date. Please choose an earlier date or update your records.
+                      Your Serology report expires (or expired) on <strong>{expiryDateString}</strong>, which is before your selected date.
                     </p>
                   </div>
                 </div>
@@ -736,55 +820,38 @@ export default function PatientSearchBooking() {
               <div className='mb-5'>
                 <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Select Date</label>
                 <input type="date" min={minDateString} value={draftDate} onChange={e => setDraftDate(e.target.value)} className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-slate-800' />
-                <p className='text-[10px] font-bold text-blue-600 mt-2 opacity-70'>*Travel bookings require minimum 14 days advance notice.</p>
+                <p className='text-[10px] font-bold text-blue-600 mt-2 opacity-70'>*Travel bookings require minimum {advanceNoticeDays} days advance notice.</p>
               </div>
 
               <div className='space-y-3 mb-5 relative'>
-                {/* MORNING SHIFT */}
                 <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Morning') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
                   <div>
                     <p className={`font-bold ${!isEligibleForSelectedDate || morningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Morning Shift</p>
-                    <p className='text-xs text-slate-500 flex items-center gap-1'><FiClock /> 8:00am - 12:00pm</p>
-                    <p className={`text-xs font-bold mt-1 ${morningSlots > 0 && isEligibleForSelectedDate ? 'text-emerald-600' : 'text-red-500'}`}>{morningSlots > 0 ? `${morningSlots < 10 ? '0'+morningSlots : morningSlots} Slots Available` : 'Full (No Slots)'}</p>
+                    <p className={`text-xs font-bold mt-1 ${morningSlots > 0 && isEligibleForSelectedDate ? 'text-emerald-600' : 'text-red-500'}`}>{morningSlots > 0 ? `${morningSlots} Slots Available` : 'Full (No Slots)'}</p>
                   </div>
-                  <button type="button" disabled={!isEligibleForSelectedDate || morningSlots === 0} onClick={() => setDraftShift('Morning (08:00 - 12:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Morning') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                  <button type="button" disabled={!isEligibleForSelectedDate || morningSlots === 0} onClick={() => setDraftShift('Morning (08:00 - 12:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Morning') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                     {draftShift.includes('Morning') ? 'Selected' : 'Select'}
                   </button>
                 </div>
-
-                {/* AFTERNOON SHIFT */}
+                
                 <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Afternoon') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
                   <div>
                     <p className={`font-bold ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Afternoon Shift</p>
-                    <p className='text-xs text-slate-500 flex items-center gap-1'><FiClock /> 12:00pm - 4:00pm</p>
-                    <p className={`text-xs font-bold mt-1 ${afternoonSlots > 0 && isEligibleForSelectedDate ? 'text-amber-600' : 'text-red-500'}`}>{afternoonSlots > 0 ? `${afternoonSlots < 10 ? '0'+afternoonSlots : afternoonSlots} Slots Available` : 'Full (No Slots)'}</p>
+                    <p className={`text-xs font-bold mt-1 ${afternoonSlots > 0 && isEligibleForSelectedDate ? 'text-amber-600' : 'text-red-500'}`}>{afternoonSlots > 0 ? `${afternoonSlots} Slots Available` : 'Full (No Slots)'}</p>
                   </div>
-                  <button type="button" disabled={!isEligibleForSelectedDate || afternoonSlots === 0} onClick={() => setDraftShift('Afternoon (12:00 - 16:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Afternoon') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                  <button type="button" disabled={!isEligibleForSelectedDate || afternoonSlots === 0} onClick={() => setDraftShift('Afternoon (12:00 - 16:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Afternoon') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                     {draftShift.includes('Afternoon') ? 'Selected' : 'Select'}
-                  </button>
-                </div>
-
-                {/* EVENING SHIFT */}
-                <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Evening') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
-                  <div>
-                    <p className={`font-bold ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Evening Shift</p>
-                    <p className='text-xs text-slate-500 flex items-center gap-1'><FiClock /> 5:00pm - 9:00pm</p>
-                    <p className={`text-xs font-bold mt-1 ${eveningSlots > 0 && isEligibleForSelectedDate ? 'text-purple-600' : 'text-red-500'}`}>{eveningSlots > 0 ? `${eveningSlots < 10 ? '0'+eveningSlots : eveningSlots} Slots Available` : 'Full (No Slots)'}</p>
-                  </div>
-                  <button type="button" disabled={!isEligibleForSelectedDate || eveningSlots === 0} onClick={() => setDraftShift('Evening (17:00 - 21:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Evening') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                    {draftShift.includes('Evening') ? 'Selected' : 'Select'}
                   </button>
                 </div>
               </div>
 
-              {/* SOFT WARNING IF SHIFT IS DIFFERENT */}
               {!isShiftMatch && draftShift && (
                 <div className='mb-5 p-4 rounded-xl border bg-amber-50 border-amber-200 flex items-start gap-3'>
                   <FiAlertCircle className='text-amber-600 text-xl shrink-0 mt-0.5' />
                   <div>
                     <h4 className='text-sm font-black text-amber-800'>Shift Time Altered</h4>
                     <p className='text-xs font-bold mt-1 leading-relaxed text-amber-700'>
-                      You usually dialyze in the <strong>{patientRecord?.preferred_shift}</strong>. Booking a different shift changes your fluid accumulation interval. Please monitor your fluid intake strictly.
+                      You usually dialyze in the <strong>{patientRecord?.preferred_shift}</strong>. Booking a different shift changes your fluid accumulation interval.
                     </p>
                   </div>
                 </div>
@@ -794,7 +861,7 @@ export default function PatientSearchBooking() {
                 type="button" 
                 onClick={addSessionToCart}
                 disabled={!draftShift || !draftDate || !isEligibleForSelectedDate} 
-                className='w-full py-4 bg-slate-100 text-blue-600 border-2 border-blue-100 rounded-2xl font-black text-sm hover:bg-blue-50 hover:border-blue-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all flex justify-center items-center gap-2'
+                className='w-full py-4 bg-slate-100 text-blue-600 border-2 border-blue-100 rounded-2xl font-black text-sm hover:bg-blue-50 transition-all flex justify-center items-center gap-2'
               >
                 <FiPlus /> Add Session to Cart
               </button>
@@ -806,17 +873,10 @@ export default function PatientSearchBooking() {
       {/* ========================================= */}
       {/* VIEW 3: REVIEW & CONFIRM OVERLAY */}
       {/* ========================================= */}
-{/* ========================================= */}
-      {/* VIEW 3: REVIEW & CONFIRM OVERLAY */}
-      {/* ========================================= */}
-      {/* FIX: We added '&& selectedBranch' here. 
-          This is a "safety guard" that prevents the screen from trying to 
-          load if the branch data accidentally goes missing.
-      */}
       {showReviewScreen && selectedBranch && (
         <div className='flex flex-col h-full w-full bg-slate-50 animate-in slide-in-from-right-8 duration-300 z-30 absolute inset-0'>
           <div className='bg-white px-5 pt-12 pb-4 shadow-sm flex items-center justify-between shrink-0 border-b border-slate-100'>
-            <button onClick={() => setShowReviewScreen(false)} className='p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full flex items-center gap-1 font-bold text-sm transition-colors'>
+            <button onClick={handleCancelReview} className='p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full flex items-center gap-1 font-bold text-sm transition-colors'>
               <FiChevronLeft className='text-2xl' /> Edit
             </button>
             <h1 className='text-lg font-black text-slate-800'>Review Request</h1>
@@ -825,9 +885,19 @@ export default function PatientSearchBooking() {
 
           <div className='flex-1 overflow-y-auto p-5 pb-safe custom-scrollbar space-y-6'>
             
+            {homeConflicts.length > 0 && (
+              <div className='bg-amber-50 border border-amber-200 p-5 rounded-2xl animate-in slide-in-from-top-4'>
+                <h4 className='text-xs font-black text-amber-800 uppercase tracking-widest flex items-center gap-1.5 mb-2'>
+                  <FiAlertCircle className='text-lg' /> Home Schedule Conflict
+                </h4>
+                <p className='text-xs font-bold text-amber-700 leading-relaxed text-justify'>
+                  Your selected travel dates (<strong>{homeConflicts.join(', ')}</strong>) overlap with your routine Home centre schedule. By submitting this request, your Home sessions on these dates will be automatically cancelled upon Manager approval to prevent double-booking.
+                </p>
+              </div>
+            )}
+
             <div className='bg-white p-5 rounded-2xl shadow-sm border border-slate-100'>
               <p className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1'>Target Clinic</p>
-              {/* Added ?. just in case of a split-second race condition */}
               <h2 className='text-lg font-black text-slate-800'>{selectedBranch?.branch_name}</h2>
               <p className='text-xs font-bold text-slate-500 mt-1 flex items-center gap-1'><FiMapPin /> {selectedBranch?.branch_address}</p>
             </div>
@@ -844,29 +914,9 @@ export default function PatientSearchBooking() {
                         <p className='text-[10px] font-bold text-slate-500 uppercase'>{s.shift.split('(')[0]}</p>
                       </div>
                     </div>
-                    {selectedBranch?.session_price && <p className='text-sm font-bold text-slate-600'>RM {selectedBranch.session_price}</p>}
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div className='bg-blue-600 text-white p-6 rounded-2xl shadow-md'>
-              <div className='flex justify-between items-center border-b border-blue-500 pb-4 mb-4'>
-                <p className='text-sm font-bold text-blue-100'>Total Estimated Cost</p>
-                <p className='text-2xl font-black'>{selectedBranch?.session_price ? `RM ${selectedBranch.session_price * selectedSessions.length}` : 'TBC'}</p>
-              </div>
-              <p className='text-[10px] font-medium text-blue-200 leading-relaxed text-justify'>
-                *This is an estimate. Final billing will be handled directly by the clinic. Payment can be made via Cash, Panel, or Guarantee Letter (GL) upon arrival at the center.
-              </p>
-            </div>
-
-            <div className='bg-amber-50 border border-amber-200 p-5 rounded-2xl'>
-              <h4 className='text-xs font-black text-amber-800 uppercase tracking-widest flex items-center gap-1.5 mb-2'>
-                <FiFileText className='text-lg' /> Document Requirement
-              </h4>
-              <p className='text-xs font-bold text-amber-700 leading-relaxed text-justify'>
-                By submitting this request, you agree to ensure your <strong>Serology Report</strong> and <strong>Doctor's Referral Letter</strong> are uploaded to your Profile page before your travel dates. The Branch Manager will review these documents before approving your slots.
-              </p>
             </div>
 
             <button 
@@ -880,27 +930,6 @@ export default function PatientSearchBooking() {
         </div>
       )}
 
-      {/* ========================================= */}
-      {/* FULLSCREEN ZOOM OVERLAY */}
-      {/* ========================================= */}
-      {showZoom && uniquePhotos.length > 0 && (
-        <div className='fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center animate-in fade-in'>
-          <button onClick={() => setShowZoom(false)} className='absolute top-safe right-4 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-md transition-colors z-50'><FiX className='text-2xl' /></button>
-          <div className='w-full h-[70vh] relative overflow-hidden'>
-            <div className='flex w-full h-full transition-transform duration-500 ease-in-out' style={{ transform: `translateX(-${currentPhotoIndex * 100}%)` }}>
-              {uniquePhotos.map((photo, i) => <img key={i} src={photo} className='min-w-full h-full object-contain flex-shrink-0' />)}
-            </div>
-          </div>
-          {uniquePhotos.length > 1 && (
-            <div className='absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center justify-between w-[280px] z-50'>
-              <button onClick={prevPhoto} className='w-14 h-14 flex items-center justify-center bg-white/10 hover:bg-white/30 border border-white/20 text-white rounded-full backdrop-blur-md transition-colors shadow-lg'><FiChevronLeft className='text-4xl -ml-1' /></button>
-              <div className='text-white font-bold tracking-widest text-sm bg-black/50 px-5 py-2.5 rounded-full backdrop-blur-md border border-white/10'>{currentPhotoIndex + 1} / {uniquePhotos.length}</div>
-              <button onClick={nextPhoto} className='w-14 h-14 flex items-center justify-center bg-white/10 hover:bg-white/30 border border-white/20 text-white rounded-full backdrop-blur-md transition-colors shadow-lg'><FiChevronRight className='text-4xl ml-1' /></button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* SUCCESS DIALOG */}
       {showSuccessDialog && (
         <div className='absolute inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-5 animate-in fade-in'>
@@ -908,7 +937,6 @@ export default function PatientSearchBooking() {
             <FiCheckCircle className='text-6xl text-emerald-500 mx-auto mb-4' />
             <h3 className='text-xl font-black text-slate-800 mb-2'>Booking Submitted!</h3>
             <p className='text-sm font-bold text-slate-500 mb-6'>{selectedSessions.length} sessions sent for approval.</p>
-            <div className='inline-block bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-6'>Pending Manager Approval</div>
             <button onClick={closeSuccessDialog} className='w-full py-3.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl font-bold transition-colors'>Return to Dashboard</button>
           </div>
         </div>

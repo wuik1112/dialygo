@@ -44,7 +44,14 @@ export default function SystemRules() {
     const numericValue = parseInt(newValue);
 
     if (isNaN(numericValue) || numericValue <= 0) {
-      setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'error', text: 'Value must be greater than zero.' } }));
+      setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'error', text: 'Error: Value must be a positive integer greater than zero.' } }));
+      setSavingId(null);
+      return;
+    }
+
+    // --- NEW: CANCELLATION CUT-OFF SAFETY GUARD ---
+    if (rule.rule_name === 'Cancellation Cut-off Hours' && numericValue > 168) {
+      setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'error', text: 'Error: Cancellation cut-off cannot exceed 168 hours (7 days).' } }));
       setSavingId(null);
       return;
     }
@@ -66,7 +73,7 @@ export default function SystemRules() {
         if (numericValue < highestBranchLoad) {
           setMessages(prev => ({ 
             ...prev, 
-            [rule.rule_id]: { type: 'error', text: `Failed: Current active bookings (${highestBranchLoad}) exceed this new limit.` } 
+            [rule.rule_id]: { type: 'error', text: 'Cannot apply rule. The new limit is lower than the current active bookings. Please cancel existing bookings first.' } 
           }));
           setSavingId(null);
           return;
@@ -82,7 +89,7 @@ export default function SystemRules() {
     if (updateError) {
       setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'error', text: 'Database sync failed.' } }));
     } else {
-      setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'success', text: 'Rule updated successfully.' } }));
+      setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'success', text: 'Booking rules updated successfully.' } }));
       setTimeout(() => {
         setMessages(prev => ({ ...prev, [rule.rule_id]: { type: '', text: '' } }));
       }, 3000);
