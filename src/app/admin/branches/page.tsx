@@ -216,7 +216,11 @@ export default function BranchManagement() {
     
     const { count: staffCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('branch_id', branch.id);
     const today = new Date().toISOString().split('T')[0];
-    const { count: bookingCount } = await supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('branch_id', branch.id).gte('booking_date', today).in('status', ['CONFIRMED', 'PENDING_REVIEW']);
+    const { count: bookingCount } = await supabase.from('bookings')
+  .select('*', { count: 'exact', head: true })
+  .eq('branch_id', branch.id)
+  .gte('booking_date', today)
+  .in('booking_status', ['Scheduled', 'Pending Reschedule', 'In Progress', 'Pending Approval']);
     
     setBranchStats({
       staff: staffCount || 0,
