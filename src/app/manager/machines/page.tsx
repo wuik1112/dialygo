@@ -307,7 +307,7 @@ export default function ManagerMachineStatus() {
       <div className='min-h-screen bg-slate-50 flex items-center justify-center'>
         <div className='flex flex-col items-center text-blue-600 font-bold'>
           <FiActivity className='text-4xl mb-4 animate-spin' />
-          <span>Loading Clinical Asset Inventory...</span>
+          <span>Loading Machine Inventory...</span>
         </div>
       </div>
     );
@@ -366,7 +366,7 @@ export default function ManagerMachineStatus() {
 
         <div className='flex flex-col md:flex-row justify-between items-end mb-8 gap-4'>
           <div>
-            <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Clinical Asset Management</h1>
+            <h1 className='text-3xl font-bold text-slate-800 tracking-tight'>Machine Inventory</h1>
 
           </div>
           <button onClick={handleAddClick} className='px-6 py-2.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 shadow-lg transition-all shrink-0'>

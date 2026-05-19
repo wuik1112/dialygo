@@ -95,7 +95,6 @@ export default function SessionLogs() {
       <header className="mb-8 flex flex-col md:flex-row justify-between md:items-end gap-6">
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Session Logs</h1>
-          <p className="text-slate-500 font-bold mt-1 flex items-center gap-2"><FiFileText className="text-blue-500" /> Clinical Audit Trail</p>
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
           <div className="relative w-full sm:w-72">

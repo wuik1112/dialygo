@@ -68,12 +68,8 @@ export default function NurseSettings() {
       
       {/* HEADER */}
       <div className="flex items-center gap-4 mb-8">
-        <Link href="/nurse" className="h-10 w-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors shadow-sm">
-          <FiArrowLeft className="text-xl" />
-        </Link>
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Profile Settings</h1>
-          <p className="text-sm font-bold text-slate-500">Manage your clinical account and security</p>
         </div>
       </div>
 

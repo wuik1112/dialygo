@@ -60,9 +60,6 @@ export default function ActiveSessionsBoard() {
     <main className="p-4 sm:p-8 max-w-7xl mx-auto pb-24">
       <header className="mb-8">
         <h1 className="text-3xl font-black text-slate-900 tracking-tight">Active Sessions</h1>
-        <p className="text-slate-500 font-bold mt-1 flex items-center gap-2">
-          <FiActivity className="text-blue-500" /> Currently running dialysis treatments
-        </p>
       </header>
 
       {activeTreatments.length > 0 ? (
