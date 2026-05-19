@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabase';
 import { 
   FiSearch, FiEdit2, FiSave, FiX, FiActivity, FiDroplet, 
   FiFileText, FiUploadCloud, FiTrendingUp, FiShield, FiClipboard,
-  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter, FiMapPin
+  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter, FiMapPin, FiClock
 } from 'react-icons/fi';
 
 export default function ClinicalPatientRecord() {
@@ -78,7 +78,10 @@ export default function ClinicalPatientRecord() {
   const handleSelectPatient = (patient: any) => {
     setSelectedPatient(patient);
     setIsEditing(false);
-    setSerologyDate(''); // Reset date picker when changing patients
+    
+    // Load the saved date from the database instead of forcing it to be blank!
+    setSerologyDate(patient.last_serology_date || ''); 
+    
     const rx = patient.prescriptions?.find((p: any) => p.status === 'Active');
     if (rx) {
       setRxForm({
@@ -107,7 +110,6 @@ export default function ClinicalPatientRecord() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !selectedPatient) return;
     
-    // Clinical Safety Check for Test Date
     if (!serologyDate) {
       alert("Clinical Error: Please input the actual Serology Test Date from the lab report before uploading the document.");
       return;
@@ -126,7 +128,6 @@ export default function ClinicalPatientRecord() {
 
       const { data: { publicUrl } } = supabase.storage.from('patient_documents').getPublicUrl(filePath);
 
-      // Update Database: Restores Travel Eligibility and sets correct Lab Date
       const { error: updateError } = await supabase
         .from('patients')
         .update({ 
@@ -142,7 +143,7 @@ export default function ClinicalPatientRecord() {
       alert("Serology report uploaded and travel eligibility restored!");
       fetchClinicalData();
       setSelectedPatient({...selectedPatient, serology_report_url: publicUrl, last_serology_date: serologyDate, travel_status: 'Active'});
-      setSerologyDate(''); // Reset input
+      setSerologyDate(''); 
     } catch (err: any) {
       alert("Upload failed: " + err.message);
     } finally {
@@ -153,7 +154,6 @@ export default function ClinicalPatientRecord() {
   const handleSavePrescription = async () => {
     if (!selectedPatient || !nephrologistId) return;
 
-    // --- NEW: CLINICAL SAFETY RANGE VALIDATION ---
     const checkKtv = parseFloat(rxForm.target_ktv);
     const checkWeight = parseFloat(rxForm.target_dry_weight);
     const checkDuration = parseInt(rxForm.target_duration);
@@ -170,7 +170,6 @@ export default function ClinicalPatientRecord() {
       alert("Clinical Warning: Target Duration is outside safety limits (120 - 480 mins). Please verify.");
       return;
     }
-    // ---------------------------------------------
 
     const payload = {
       patient_id: selectedPatient.patient_id,
@@ -208,9 +207,15 @@ export default function ClinicalPatientRecord() {
 
   if (isLoading) return <div className="p-8 text-center font-bold text-blue-600"><FiActivity className="animate-spin mx-auto text-3xl mb-2" /> Loading Clinical Workstation...</div>;
 
-  // SAFETY LOCK: Check if patient is currently plugged into a machine
   const isUndergoingDialysis = selectedPatient?.treatments?.some((t: any) => t.session_status === 'Ongoing');
   
+  const archivedPrescriptions = selectedPatient?.prescriptions
+    ?.filter((p: any) => p.status === 'Archived')
+    ?.sort((a: any, b: any) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+  // Helper to extract clinical details from the ACTIVE prescription
+  const activeRx = selectedPatient?.prescriptions?.find((p: any) => p.status === 'Active');
+
   return (
     <main className="p-8 max-w-[1600px] mx-auto flex gap-8 h-[calc(100vh-2rem)] print:p-0 print:m-0 print:h-auto">
       
@@ -298,7 +303,7 @@ export default function ClinicalPatientRecord() {
                   <span className="px-3 py-1 bg-red-50 text-red-600 rounded-lg text-[10px] font-black uppercase tracking-widest block mb-2 print:border print:border-black print:bg-white print:text-black">
                     Blood: {selectedPatient.patient_blood_type} | HepB: {selectedPatient.hepatitis_b_status}
                   </span>
-                  <p className="text-xs font-bold text-slate-600 print:text-black">Primary Dx: <span className="text-slate-900 print:text-black">{selectedPatient.primary_diagnosis || 'Not recorded'}</span></p>
+                  <p className="text-xs font-bold text-slate-600 print:text-black">Primary Dx: <span className="text-slate-900 print:text-black">{activeRx?.primary_diagnosis || 'Not recorded'}</span></p>
                 </div>
               </div>
             </div>
@@ -319,15 +324,29 @@ export default function ClinicalPatientRecord() {
               ))}
             </div>
 
-            <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-y-auto p-8 print:border-none print:shadow-none print:p-0 print:overflow-visible">
+            <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-y-auto p-8 print:border-none print:shadow-none print:p-0 print:overflow-visible custom-scrollbar">
               
               {/* SECTION 2: PRESCRIPTION EDITOR */}
               {activeTab === 'rx' && (
                 <section>
-                  <div className="flex justify-between items-center mb-8 pb-4 border-b border-slate-100 print:border-black print:mt-8">
+                  <div className="flex justify-between items-start mb-8 pb-4 border-b border-slate-100 print:border-black print:mt-8">
                     <div>
                       <h3 className="text-xl font-black text-slate-900 print:text-black">Official Dialysis Prescription</h3>
-                      <p className="text-xs font-bold text-slate-500 mt-1 flex items-center gap-1 print:text-black"><FiShield className="text-emerald-500 print:hidden"/> Clinical Document</p>
+                      <div className="flex items-center gap-3 mt-2">
+                        <p className="text-xs font-bold text-slate-500 flex items-center gap-1 print:text-black"><FiShield className="text-emerald-500 print:hidden"/> Clinical Document</p>
+                        
+                        {/* QUICK LINKS FOR NEPHROLOGIST REFERENCE */}
+                        {selectedPatient.serology_report_url && (
+                          <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded md:flex items-center gap-1 hover:bg-blue-100 transition-colors hidden">
+                            <FiFileText /> Serology Report
+                          </a>
+                        )}
+                        {selectedPatient.referral_letter_url && (
+                          <a href={selectedPatient.referral_letter_url} target="_blank" rel="noreferrer" className="text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded md:flex items-center gap-1 hover:bg-purple-100 transition-colors hidden">
+                            <FiFileText /> Referral Letter
+                          </a>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="flex gap-3 print:hidden">
@@ -335,7 +354,6 @@ export default function ClinicalPatientRecord() {
                         <FiPrinter /> Export PDF
                       </button>
                       
-                      {/* ACTIVE DIALYSIS LOCK IMPLEMENTATION */}
                       {isUndergoingDialysis ? (
                         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-700 rounded-xl font-bold text-sm border border-red-200">
                            <FiAlertCircle /> Locked: Active Dialysis in Progress
@@ -463,6 +481,37 @@ export default function ClinicalPatientRecord() {
                     <div className="w-64 border-b border-black"></div>
                     <p className="text-xs text-black mt-2">Date: ____________________</p>
                   </div>
+
+                  {/* F. NEW: HISTORICAL PRESCRIPTIONS AUDIT LOG */}
+                  {archivedPrescriptions && archivedPrescriptions.length > 0 && (
+                    <div className="mt-16 pt-8 border-t border-slate-200 print:hidden">
+                      <h4 className="font-black text-slate-800 mb-6 flex items-center gap-2">
+                        <FiClock className="text-slate-400"/> Historical Prescriptions (Audit Trail)
+                      </h4>
+                      <div className="grid grid-cols-1 gap-4">
+                        {archivedPrescriptions.map((archived: any) => (
+                          <div key={archived.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-1">
+                                Signed: {new Date(archived.updated_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                              <div className="flex gap-4 text-sm font-bold text-slate-800">
+                                <span>Dry Wt: {archived.target_dry_weight || 'N/A'} kg</span>
+                                <span className="text-slate-300">|</span>
+                                <span>Modality: {archived.treatment_modality}</span>
+                                <span className="text-slate-300">|</span>
+                                <span>Qb: {archived.blood_flow_rate}</span>
+                                <span className="text-slate-300">|</span>
+                                <span>Heparin: {archived.is_heparin_free ? 'Free' : `${archived.heparin_dosage} IU`}</span>
+                              </div>
+                            </div>
+                            <span className="px-3 py-1.5 bg-slate-200 text-slate-600 text-[10px] font-black uppercase rounded-lg">Archived Version</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                 </section>
               )}
 
@@ -470,40 +519,61 @@ export default function ClinicalPatientRecord() {
               {activeTab === 'clinical' && (
                 <section className="space-y-8 animate-in fade-in print:hidden">
                   
-                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex justify-between items-center">
-                    <div>
-                      <h4 className="font-black text-blue-900 flex items-center gap-2 mb-1"><FiFileText /> Lab & Serology Reports</h4>
-                      <p className="text-xs text-blue-700 font-medium">Status: {selectedPatient.serology_document_status || 'Missing'}</p>
-                    </div>
-                    
-                    {/* IMPLEMENTED: Date Picker and Upload Group */}
-                    <div className="flex items-center gap-3">
-                      <div className="flex flex-col">
-                        <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-1">Actual Lab Date</label>
-                        <input 
-                          type="date" 
-                          max={new Date().toISOString().split("T")[0]} 
-                          value={serologyDate} 
-                          onChange={(e) => setSerologyDate(e.target.value)} 
-                          className="px-3 py-2 text-xs font-bold text-slate-700 rounded-xl border border-blue-200 outline-none focus:border-blue-500"
-                        />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex flex-col justify-between">
+                      <div>
+                        <h4 className="font-black text-blue-900 flex items-center gap-2 mb-1"><FiFileText /> Lab & Serology Reports</h4>
+                        <p className="text-xs text-blue-700 font-medium">Status: {selectedPatient.serology_document_status || 'Missing'}</p>
                       </div>
-
-                      {selectedPatient.serology_report_url && (
-                        <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="mt-5 text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-50 flex items-center gap-2 transition-colors">
-                          <FiCheckCircle /> View Active File
-                        </a>
-                      )}
                       
-                      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
-                      <button 
-                        disabled={isUploading || !serologyDate} 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="mt-5 text-xs px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-blue-300 disabled:cursor-not-allowed"
-                      >
-                        {isUploading ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
-                        {selectedPatient.serology_report_url ? "Update Document" : "Upload Document"}
-                      </button>
+                      <div className="mt-4 flex flex-col gap-3">
+                        <div className="flex flex-col">
+                          <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-1">Actual Lab Date</label>
+                          <input 
+                            type="date" 
+                            max={new Date().toISOString().split("T")[0]} 
+                            value={serologyDate} 
+                            onChange={(e) => setSerologyDate(e.target.value)} 
+                            className="px-3 py-2 text-xs font-bold text-slate-700 rounded-xl border border-blue-200 outline-none focus:border-blue-500 w-full md:w-auto"
+                          />
+                        </div>
+
+                        <div className="flex gap-2">
+                          {selectedPatient.serology_report_url && (
+                            <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center gap-2 transition-colors flex-1 justify-center">
+                              <FiCheckCircle /> View Active File
+                            </a>
+                          )}
+                          
+                          <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
+                          <button 
+                            disabled={isUploading || !serologyDate} 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="text-xs px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-blue-300 disabled:cursor-not-allowed flex-1 justify-center"
+                          >
+                            {isUploading ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
+                            {selectedPatient.serology_report_url ? "Update Document" : "Upload Document"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-purple-50 border border-purple-100 rounded-2xl p-6 flex flex-col justify-between">
+                      <div>
+                        <h4 className="font-black text-purple-900 flex items-center gap-2 mb-1"><FiFileText /> Referral Letter</h4>
+                        <p className="text-xs text-purple-700 font-medium">Status: {selectedPatient.referral_document_status || 'Missing'}</p>
+                      </div>
+                      <div className="mt-4">
+                        {selectedPatient.referral_letter_url ? (
+                          <a href={selectedPatient.referral_letter_url} target="_blank" rel="noreferrer" className="w-full text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center justify-center gap-2 transition-colors">
+                            <FiCheckCircle /> View Referral Letter
+                          </a>
+                        ) : (
+                          <div className="w-full text-xs px-4 py-2.5 bg-purple-100/50 text-purple-500 font-bold rounded-xl border border-purple-200 flex items-center justify-center gap-2">
+                            <FiAlertCircle /> No Document Provided
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -511,23 +581,23 @@ export default function ClinicalPatientRecord() {
                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
                       <h4 className="font-black text-slate-900 flex items-center gap-2 mb-4"><FiActivity className="text-blue-500"/> Vascular Access Status</h4>
                       <div className="space-y-3">
-                        <p className="text-sm"><span className="text-slate-500 font-bold">Type:</span> <span className="font-black">{selectedPatient.vascular_access_type || 'Unknown'}</span></p>
-                        <p className="text-sm"><span className="text-slate-500 font-bold">Location:</span> <span className="font-black">{selectedPatient.vascular_access_location || 'Unknown'}</span></p>
-                        <p className="text-sm"><span className="text-slate-500 font-bold">Known Complications:</span> <span className="font-black text-red-600">{selectedPatient.vascular_access_complications || 'None reported'}</span></p>
+                        <p className="text-sm"><span className="text-slate-500 font-bold">Type:</span> <span className="font-black">{activeRx?.vascular_access_type || 'Unknown'}</span></p>
+                        <p className="text-sm"><span className="text-slate-500 font-bold">Location:</span> <span className="font-black">{activeRx?.vascular_access_location || 'Unknown'}</span></p>
+                        <p className="text-sm"><span className="text-slate-500 font-bold">Known Complications:</span> <span className="font-black text-red-600">{activeRx?.vascular_access_complications || 'None reported'}</span></p>
                       </div>
                     </div>
                     <div className="bg-amber-50 p-6 rounded-2xl border border-amber-200">
                       <h4 className="font-black text-amber-900 flex items-center gap-2 mb-4"><FiDroplet className="text-amber-500"/> Residual Kidney Function</h4>
                       <div className="space-y-3">
-                        <p className="text-sm"><span className="text-amber-700 font-bold">24h Urine Output:</span> <span className="font-black text-amber-900">{selectedPatient.residual_urine_output || 0} mL/day</span></p>
-                        <p className="text-sm"><span className="text-amber-700 font-bold">Last Assessed:</span> <span className="font-black">{selectedPatient.last_rkf_assessment || 'No data'}</span></p>
+                        <p className="text-sm"><span className="text-amber-700 font-bold">24h Urine Output:</span> <span className="font-black text-amber-900">{activeRx?.residual_urine_output || 0} mL/day</span></p>
+                        <p className="text-sm"><span className="text-amber-700 font-bold">Last Assessed:</span> <span className="font-black">{activeRx?.last_rkf_assessment || 'No data'}</span></p>
                       </div>
                     </div>
                   </div>
 
                   <div className="border border-slate-200 rounded-2xl p-6">
                     <h4 className="font-black text-slate-900 mb-4 text-sm uppercase tracking-widest">Active Medication Profile</h4>
-                    <p className="text-sm font-bold text-slate-600 bg-slate-50 p-4 rounded-xl">{selectedPatient.current_medications || 'No current medications logged.'}</p>
+                    <p className="text-sm font-bold text-slate-600 bg-slate-50 p-4 rounded-xl">{activeRx?.current_medications || 'No current medications logged.'}</p>
                   </div>
                 </section>
               )}

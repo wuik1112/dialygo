@@ -4,16 +4,14 @@ import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  FiArrowLeft, FiUser, FiLock, FiShield, 
-  FiMapPin, FiMail, FiPhone, FiCheckCircle, FiSave, FiAlertCircle
+  FiArrowLeft, FiUser, FiShield, 
+  FiMapPin, FiMail 
 } from 'react-icons/fi';
+import ProfileSecuritySettings from '@/components/ProfileSecuritySettings'; // Importing the Universal Component!
 
 export default function NephrologistSettings() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [isSavingPassword, setIsSavingPassword] = useState(false);
-  const [feedback, setFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   // Read-only Official Identity State
   const [officialInfo, setOfficialInfo] = useState({
@@ -22,19 +20,6 @@ export default function NephrologistSettings() {
     email: '',
     role: '',
     branch: ''
-  });
-
-  // Editable Profile State
-  const [profileForm, setProfileForm] = useState({
-    phone: '',
-    address: '',
-    emergency_contact: ''
-  });
-
-  // Password State
-  const [passwordForm, setPasswordForm] = useState({
-    newPassword: '',
-    confirmPassword: ''
   });
 
   useEffect(() => {
@@ -64,13 +49,6 @@ export default function NephrologistSettings() {
             role: userData.user_role || 'Nephrologist',
             branch: Array.isArray(branchInfo) ? branchInfo[0]?.branch_name : branchInfo?.branch_name || 'Unassigned / All Branches'
           });
-
-          // Set Editable Data
-          setProfileForm({
-            phone: userData.user_phone || '',
-            address: userData.user_address || '',
-            emergency_contact: userData.emergency_contact || ''
-          });
         }
       } catch (err) {
         console.error("Error fetching profile:", err);
@@ -81,68 +59,6 @@ export default function NephrologistSettings() {
     fetchProfile();
   }, [router]);
 
-  const showFeedback = (type: 'success' | 'error', message: string) => {
-    setFeedback({ type, message });
-    setTimeout(() => setFeedback(null), 4000);
-  };
-
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingProfile(true);
-
-    try {
-      const { data: session } = await supabase.auth.getSession();
-      if (!session.session) return;
-
-      const { error } = await supabase
-        .from('users')
-        .update({
-          user_phone: profileForm.phone,
-          user_address: profileForm.address,
-          emergency_contact: profileForm.emergency_contact
-        })
-        .eq('user_email', session.session.user.email);
-
-      if (error) throw error;
-      showFeedback('success', 'Practitioner contact information updated successfully.');
-    } catch (err: any) {
-      showFeedback('error', 'Failed to update profile: ' + err.message);
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
-
-  const handleUpdatePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      showFeedback('error', 'New passwords do not match.');
-      return;
-    }
-
-    if (passwordForm.newPassword.length < 6) {
-      showFeedback('error', 'Password must be at least 6 characters long.');
-      return;
-    }
-
-    setIsSavingPassword(true);
-
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: passwordForm.newPassword
-      });
-
-      if (error) throw error;
-
-      setPasswordForm({ newPassword: '', confirmPassword: '' });
-      showFeedback('success', 'Security password updated successfully.');
-    } catch (err: any) {
-      showFeedback('error', 'Failed to update password: ' + err.message);
-    } finally {
-      setIsSavingPassword(false);
-    }
-  };
-
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center text-blue-600"><div className="animate-pulse font-bold">Loading Profile...</div></div>;
   }
@@ -152,23 +68,10 @@ export default function NephrologistSettings() {
       
       {/* HEADER */}
       <div className="flex items-center gap-4 mb-8">
-        {/* Adjusted link to point to the Nephrologist Dashboard */}
-        <Link href="/nephrologist" className="h-10 w-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors shadow-sm">
-          <FiArrowLeft className="text-xl" />
-        </Link>
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Profile Settings</h1>
-          <p className="text-sm font-bold text-slate-500">Manage your practitioner account and security</p>
         </div>
       </div>
-
-      {/* FEEDBACK TOAST */}
-      {feedback && (
-        <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 font-bold text-sm animate-in fade-in slide-in-from-top-2 shadow-sm ${feedback.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-          {feedback.type === 'success' ? <FiCheckCircle className="text-lg" /> : <FiAlertCircle className="text-lg" />}
-          {feedback.message}
-        </div>
-      )}
 
       <div className="space-y-8">
         
@@ -211,106 +114,9 @@ export default function NephrologistSettings() {
           </div>
         </div>
 
-        {/* SECTION 2: EDITABLE CONTACT INFO */}
-        <form onSubmit={handleUpdateProfile} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-            <h2 className="font-black text-slate-800 flex items-center gap-2">
-              <FiPhone className="text-emerald-500"/> Contact Information
-            </h2>
-          </div>
-          <div className="p-6 md:p-8 space-y-6">
-            
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Personal Phone Number</label>
-              <input 
-                type="tel" 
-                value={profileForm.phone} 
-                onChange={e => setProfileForm({...profileForm, phone: e.target.value})}
-                className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-sm text-slate-900"
-                placeholder="+60 12-345 6789"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Home Address</label>
-              <textarea 
-                value={profileForm.address} 
-                onChange={e => setProfileForm({...profileForm, address: e.target.value})}
-                className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-sm text-slate-900 h-24 resize-none"
-                placeholder="Enter current residential address..."
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Emergency Contact (Name & Number)</label>
-              <input 
-                type="text" 
-                value={profileForm.emergency_contact} 
-                onChange={e => setProfileForm({...profileForm, emergency_contact: e.target.value})}
-                className="w-full p-3 bg-red-50/30 border border-red-100 rounded-xl outline-none focus:border-red-400 font-bold text-sm text-slate-900 placeholder:text-slate-400"
-                placeholder="e.g., Ali Bin Ahmad (Spouse) - 0198765432"
-              />
-            </div>
-
-            <div className="pt-4 flex justify-end">
-              <button 
-                type="submit" 
-                disabled={isSavingProfile}
-                className="px-6 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 transition-colors disabled:bg-slate-300 flex items-center gap-2 shadow-sm shadow-emerald-900/20"
-              >
-                {isSavingProfile ? 'Saving...' : <><FiSave /> Save Contact Info</>}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        {/* SECTION 3: CHANGE PASSWORD */}
-        <form onSubmit={handleUpdatePassword} className="bg-slate-900 rounded-3xl shadow-xl overflow-hidden text-white">
-          <div className="p-5 border-b border-slate-700 bg-slate-800/50">
-            <h2 className="font-black flex items-center gap-2">
-              <FiLock className="text-blue-400"/> Security & Password
-            </h2>
-          </div>
-          <div className="p-6 md:p-8 space-y-6">
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">New Password</label>
-                <input 
-                  type="password" 
-                  required
-                  value={passwordForm.newPassword} 
-                  onChange={e => setPasswordForm({...passwordForm, newPassword: e.target.value})}
-                  className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none focus:border-blue-500 font-bold text-sm text-white placeholder:text-slate-500"
-                  placeholder="••••••••"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Confirm New Password</label>
-                <input 
-                  type="password" 
-                  required
-                  value={passwordForm.confirmPassword} 
-                  onChange={e => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
-                  className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none focus:border-blue-500 font-bold text-sm text-white placeholder:text-slate-500"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 flex flex-col sm:flex-row justify-between items-center gap-4">
-              <p className="text-[10px] font-bold text-slate-400">* Passwords must be at least 6 characters long.</p>
-              <button 
-                type="submit" 
-                disabled={isSavingPassword || !passwordForm.newPassword || !passwordForm.confirmPassword}
-                className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 transition-colors disabled:bg-slate-700 disabled:text-slate-500 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50"
-              >
-                {isSavingPassword ? 'Updating...' : <><FiLock /> Update Password</>}
-              </button>
-            </div>
-          </div>
-        </form>
+        {/* SECTION 2: UNIVERSAL SECURITY COMPONENT */}
+        {/* This will automatically render the beautiful layout you made earlier! */}
+        <ProfileSecuritySettings />
 
       </div>
     </main>

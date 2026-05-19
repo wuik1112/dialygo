@@ -132,9 +132,6 @@ export default function NephrologistDashboard() {
     <main className="p-4 sm:p-8 max-w-7xl mx-auto pb-24">
       <header className="mb-8">
         <h1 className="text-3xl font-black text-slate-900 tracking-tight">Nephrologist Portal</h1>
-        <p className="text-slate-500 font-medium mt-1 flex items-center gap-2">
-          <FiActivity className="text-blue-500" /> Global Clinical Network Overview
-        </p>
       </header>
 
       {/* TOP METRICS */}
