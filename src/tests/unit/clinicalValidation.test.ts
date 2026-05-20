@@ -1,4 +1,4 @@
-import { checkSerologyEligibility } from './clinicalValidation';
+import { checkSerologyEligibility } from '@/utils/validationHelpers';
 
 describe('Clinical Validation: Serology Expiration Logic', () => {
 

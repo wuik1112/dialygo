@@ -7,7 +7,7 @@ import {
   FiArrowLeft, FiCheckCircle, FiAlertCircle, FiClock, FiActivity, 
   FiDroplet, FiPlus, FiSave, FiAlertTriangle, FiUnlock, FiPauseCircle, FiPlayCircle 
 } from 'react-icons/fi';
-import { validateDischargeVitals } from '@/utils/validationHelpers';
+import { validateDischargeVitals, validateHourlyVitals } from '@/utils/validationHelpers';
 
 function MonitorContent() {
   const router = useRouter();
@@ -102,6 +102,11 @@ function MonitorContent() {
 
   const handleAddHourlyLog = async (e: React.FormEvent) => {
     e.preventDefault();
+    const hourlyValidation = validateHourlyVitals(newLog.bp_sys, newLog.bp_dia, newLog.vp, newLog.tmp, newLog.uf_rate, newLog.bf);
+    if (!hourlyValidation.isValid) {
+      alert(hourlyValidation.errorMessage); // Block the save and warn the nurse!
+      return;
+    }
     setIsLogging(true);
     try {
       const nowTime = new Date().toTimeString().split(' ')[0]; 
@@ -138,7 +143,7 @@ function MonitorContent() {
   const requiresExplanation = isUfMismatch || isOverrideActive || dischargeForm.complications.includes('PAUSED');
   const hasRequiredExplanation = requiresExplanation ? (dischargeForm.complications.length > 10) : true;
 
-  const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, dischargeForm.bp_dia);
+const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, dischargeForm.bp_dia, dischargeForm.post_hr, dischargeForm.post_weight);
   const isDischargeValid = hemostasisAchieved && needlesIntact && dischargeForm.post_weight !== '' && hasRequiredExplanation && !isPaused && vitalsValidation.isValid;
 
   const handleDischarge = async (e: React.FormEvent) => {

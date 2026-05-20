@@ -7,6 +7,7 @@ import {
   FiArrowLeft, FiAlertTriangle, FiDroplet, FiShield, 
   FiPlayCircle, FiCheckSquare, FiUser, FiActivity, FiMapPin, FiCheckCircle
 } from 'react-icons/fi';
+import { validatePreFlightData } from '@/utils/validationHelpers';
 
 function StartTreatmentContent() {
   const router = useRouter();
@@ -117,9 +118,17 @@ function StartTreatmentContent() {
   };
 
   const isMachineAssigned = booking?.machine_id != null;
-  const isFormValid = ufGoal > 0 && isMachineAssigned && preFlight.dialyser_model !== '' && preFlight.dialysate_k !== '' && preFlight.accessChecked && preFlight.heparinAdministered;
-  const hasAbnormalVitals = parseInt(vitals.bp_sys) > 180 || parseInt(vitals.bp_dia) > 110 || parseFloat(vitals.pre_temp) >= 37.8;
+const preFlightValidation = validatePreFlightData(
+    vitals.bp_sys, 
+    vitals.bp_dia, 
+    vitals.pre_hr, 
+    vitals.pre_temp, 
+    vitals.pre_weight, 
+    preFlight.dialyser_model, 
+    preFlight.dialysate_k
+  );
 
+  const isFormValid = ufGoal > 0 && isMachineAssigned && preFlight.accessChecked && preFlight.heparinAdministered && preFlightValidation.isValid;
   if (isLoading) return <div className="p-8 text-center text-blue-600 font-bold animate-pulse">Loading Clinical Profile...</div>;
 
   return (
@@ -285,13 +294,20 @@ function StartTreatmentContent() {
                 </label>
               )}
             </div>
-
-            <div className={`p-4 rounded-2xl border transition-colors ${hasAbnormalVitals ? 'bg-red-900/20 border-red-500/50' : 'bg-slate-800 border-slate-700'}`}>
+<div className={`p-4 rounded-2xl border transition-colors ${!preFlightValidation.isValid ? 'bg-red-900/20 border-red-500/50' : 'bg-slate-800 border-slate-700'}`}>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
                 <span>Pre-Weight (kg)</span>
                 {prescription?.target_dry_weight && <span className="text-blue-400">Target EDW: {prescription.target_dry_weight} kg</span>}
               </label>
-              <input type="number" step="0.1" required value={vitals.pre_weight} onChange={e => setVitals({...vitals, pre_weight: e.target.value})} className="w-full bg-transparent text-4xl font-black text-white outline-none placeholder:text-slate-600" placeholder="00.0" />
+              <input 
+                type="number" 
+                step="0.1" 
+                required 
+                value={vitals.pre_weight} 
+                onChange={e => setVitals({...vitals, pre_weight: e.target.value})} 
+                className="w-full bg-transparent text-4xl font-black text-white outline-none placeholder:text-slate-600" 
+                placeholder="00.0" 
+              />
               
               {vitals.pre_weight && ufGoal > 0 && (
                 <p className="text-xs font-bold text-emerald-400 mt-2 flex items-center gap-1 animate-in fade-in">
@@ -317,9 +333,9 @@ function StartTreatmentContent() {
             </div>
 
             <div className="mt-6 space-y-3">
-              {hasAbnormalVitals && (
+              {!preFlightValidation.isValid && (
                 <p className="text-[10px] font-bold text-red-400 uppercase text-center animate-pulse flex items-center justify-center gap-1">
-                  <FiAlertTriangle /> Vitals exceed safe limits.
+                  <FiAlertTriangle /> {preFlightValidation.errorMessage}
                 </p>
               )}
               {!isMachineAssigned && (
@@ -336,7 +352,7 @@ function StartTreatmentContent() {
               <button 
                 onClick={handleStartSession} 
                 type="button" 
-                disabled={isSubmitting || !isFormValid || hasAbnormalVitals || hasActiveSession || !prescription} 
+                disabled={isSubmitting || !isFormValid || hasActiveSession || !prescription} 
                 className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 flex justify-center items-center gap-2 shadow-lg shadow-blue-900/50 transition-all"
               >
                 {hasActiveSession ? 'Session Already Ongoing' : (!prescription ? 'Missing Prescription' : (isSubmitting ? 'Processing Start...' : <><FiPlayCircle className="text-xl" /> Commence Treatment</>))}
