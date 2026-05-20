@@ -7,6 +7,7 @@ import {
   FiArrowLeft, FiCheckCircle, FiAlertCircle, FiClock, FiActivity, 
   FiDroplet, FiPlus, FiSave, FiAlertTriangle, FiUnlock, FiPauseCircle, FiPlayCircle 
 } from 'react-icons/fi';
+import { validateDischargeVitals } from '@/utils/validationHelpers';
 
 function MonitorContent() {
   const router = useRouter();
@@ -136,7 +137,9 @@ function MonitorContent() {
   const isUfMismatch = Math.abs(actualFluid - targetFluid) > 0.2; 
   const requiresExplanation = isUfMismatch || isOverrideActive || dischargeForm.complications.includes('PAUSED');
   const hasRequiredExplanation = requiresExplanation ? (dischargeForm.complications.length > 10) : true;
-  const isDischargeValid = hemostasisAchieved && needlesIntact && dischargeForm.post_weight !== '' && hasRequiredExplanation && !isPaused;
+
+  const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, dischargeForm.bp_dia);
+  const isDischargeValid = hemostasisAchieved && needlesIntact && dischargeForm.post_weight !== '' && hasRequiredExplanation && !isPaused && vitalsValidation.isValid;
 
   const handleDischarge = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -393,6 +396,12 @@ function MonitorContent() {
 
               <div className="pt-2">
                 {isPaused && <p className="text-center text-[10px] text-red-400 font-bold uppercase mb-3 animate-pulse"><FiAlertTriangle className="inline mr-1" /> Cannot discharge while paused</p>}
+                {!vitalsValidation.isValid && (
+                  <p className="text-center text-[10px] text-red-400 font-bold uppercase mb-3 animate-pulse">
+                    <FiAlertTriangle className="inline mr-1" /> {vitalsValidation.errorMessage}
+                  </p>
+                )}
+
                 <button type="submit" disabled={isSubmitting || !isDischargeValid || isPaused} className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl shadow-lg hover:bg-emerald-500 transition-colors disabled:bg-slate-700 disabled:text-slate-500 flex justify-center items-center gap-2">
                   {isSubmitting ? 'Processing...' : <><FiSave /> Sign & Discharge Patient</>}
                 </button>

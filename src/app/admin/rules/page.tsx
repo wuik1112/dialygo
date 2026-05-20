@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { FiActivity } from 'react-icons/fi';
+import { validateBookingRule } from '@/utils/validationHelpers';
 
 export default function SystemRules() {
   const [rules, setRules] = useState<any[]>([]);
@@ -10,6 +11,7 @@ export default function SystemRules() {
   const [inputValues, setInputValues] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Record<number, { type: string, text: string }>>({});
+  
 
   async function fetchRules() {
     setIsLoading(true);
@@ -43,18 +45,29 @@ export default function SystemRules() {
     const newValue = inputValues[rule.rule_id];
     const numericValue = parseInt(newValue);
 
+    
     if (isNaN(numericValue) || numericValue <= 0) {
       setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'error', text: 'Error: Value must be a positive integer greater than zero.' } }));
       setSavingId(null);
       return;
     }
 
-    // --- NEW: CANCELLATION CUT-OFF SAFETY GUARD ---
-    if (rule.rule_name === 'Cancellation Cut-off Hours' && numericValue > 168) {
-      setMessages(prev => ({ ...prev, [rule.rule_id]: { type: 'error', text: 'Error: Cancellation cut-off cannot exceed 168 hours (7 days).' } }));
+// 1. Map the database rule name to the key expected by our Jest function
+    const ruleKey = rule.rule_name === 'Cancellation Cut-off Hours' ? 'cancellation_cutoff' : rule.rule_name;
+    
+    // 2. Run the pure math function
+    const validation = validateBookingRule(ruleKey, numericValue);
+
+    // 3. If it fails, show the error from the function and stop saving
+    if (!validation.isValid) {
+      setMessages(prev => ({ 
+        ...prev, 
+        [rule.rule_id]: { type: 'error', text: validation.errorMessage } 
+      }));
       setSavingId(null);
       return;
     }
+
 
     if (rule.rule_name === 'Global Max Capacity Per Branch') {
       const { data: bookingCounts, error: countError } = await supabase

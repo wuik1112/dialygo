@@ -8,6 +8,7 @@ import {
   FiMessageSquare, FiFilter, FiHome, FiDroplet, 
   FiInbox, FiArrowUp, FiArrowDown, FiRefreshCw, FiActivity
 } from 'react-icons/fi';
+import { validateManagerApproval } from '@/utils/validationHelpers';
 
 export default function ManagerBookings() {
   const [isLoading, setIsLoading] = useState(true);
@@ -33,6 +34,16 @@ export default function ManagerBookings() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
+  const approvalValidation = selectedBooking 
+  ? validateManagerApproval(
+      selectedBooking.booking_type, 
+      selectedBooking.patients?.serology_report_url, 
+      selectedBooking.patients?.referral_letter_url, 
+      selectedBooking.booking_status.includes('Cancel'), 
+      selectedMachineId
+    ) 
+  : { isValid: false };
+  
   useEffect(() => {
     fetchBookings();
   }, []);
@@ -504,11 +515,16 @@ export default function ManagerBookings() {
                 )}
                 <div className='flex gap-3'>
                   <button onClick={() => setShowRejectModal(true)} disabled={isProcessing} className='flex-1 py-3.5 bg-white border-2 border-red-100 text-red-600 font-black rounded-xl hover:bg-red-50 transition-colors disabled:opacity-50'>Reject</button>
-                  <button 
+                  {/* <button 
                     onClick={() => handleAction('Approve')} 
                     disabled={isProcessing || (selectedBooking.booking_type === 'Travel' && (!selectedBooking.patients?.serology_report_url || !selectedBooking.patients?.referral_letter_url)) || (!selectedBooking.booking_status.includes('Cancel') && !selectedMachineId)} 
                     className='flex-1 py-3.5 bg-blue-600 text-white font-black rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:shadow-none'
-                  >
+                  > */}
+                  <button 
+  onClick={() => handleAction('Approve')} 
+  disabled={isProcessing || !approvalValidation.isValid} 
+  className='flex-1 py-3.5 bg-blue-600 text-white ...'
+>
                     {isProcessing ? 'Processing...' : 'Approve'}
                   </button>
                 </div>
