@@ -1,9 +1,20 @@
+// next.config.ts
 import type { NextConfig } from "next";
-
-/** @type {import('next').NextConfig} */
+import withPWAInit from "@ducanh2912/next-pwa";
 
 const nextConfig: NextConfig = {
-  
+  // Any existing next.js config goes here
 };
 
-export default nextConfig;
+const withPWA = withPWAInit({
+  dest: "public",
+  disable: process.env.NODE_ENV === "development",
+  cacheOnFrontEndNav: true,
+  aggressiveFrontEndNavCaching: true,
+  reloadOnOnline: true,
+  workboxOptions: {
+    disableDevLogs: true,
+  },
+});
+
+export default withPWA(nextConfig);
