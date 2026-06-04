@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import { sendNotification } from '@/utils/notificationService';
 
 export async function POST(req: Request) {
   try {
-    const { email, fullname, branchName } = await req.json();
+   const { email, fullname, branchName } = await req.json();
 
     if (!email || !fullname || !branchName) {
       return NextResponse.json({ error: "Missing assignment details" }, { status: 400 });
@@ -33,8 +34,16 @@ export async function POST(req: Request) {
         </div>
       `,
     };
-
+    
     await transporter.sendMail(mailOptions);
+    
+    await sendNotification(
+      email, 
+      "Branch Assignment Confirmed", 
+      `You have been assigned as the Branch Manager for ${branchName}.`, 
+      'Alert'
+    );
+    
     return NextResponse.json({ success: true, message: "Assignment email sent successfully" });
     
   } catch (error: any) {

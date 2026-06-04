@@ -9,6 +9,7 @@ export default function AdminSettings() {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const router = useRouter();
+  const [myUserId, setMyUserId] = useState<number | null>(null);
 
   const [passwordVerification, setPasswordVerification] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
 
@@ -42,6 +43,7 @@ export default function AdminSettings() {
           .single();
 
         if (userData) {
+          setMyUserId(userData.user_id);
           const profileData = {
             user_email: userData.user_email,
             user_ic: userData.user_ic || '',
@@ -136,6 +138,15 @@ export default function AdminSettings() {
         })
         .eq('user_email', formData.user_email);
 
+        if (myUserId) {
+        await supabase.from('notifications').insert([{
+          user_id: myUserId,
+          title: "Profile Updated",
+          message: "Your profile information was successfully updated.",
+          type: "System"
+        }]);
+      }
+
       if (dbError) throw dbError;
 
       if (passwordChanged) {
@@ -156,6 +167,7 @@ export default function AdminSettings() {
     } finally {
       setIsSaving(false);
     }
+
   };
 
   const hasChanges = 

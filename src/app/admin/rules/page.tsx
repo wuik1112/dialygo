@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { FiActivity } from 'react-icons/fi';
 import { validateBookingRule } from '@/utils/validationHelpers';
+import { broadcastNotification } from '@/utils/notificationService';
 
 export default function SystemRules() {
   const [rules, setRules] = useState<any[]>([]);
@@ -111,6 +112,14 @@ export default function SystemRules() {
     }
     
     setSavingId(null);
+
+    await fetch('/api/admin/broadcast', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: "System Rules Updated",
+      message: "The HQ Administrator has updated the system booking parameters. Please review the changes."
+    })
+  });
   };
 
   if (isLoading) {

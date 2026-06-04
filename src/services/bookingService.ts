@@ -18,15 +18,22 @@ export const bookingService = {
   },
 
   // 3. Fetch bookings pending review (for Manager view)
+// 3. Fetch bookings pending review (for Manager view)
   async getPendingBookings() {
     const { data, error } = await supabase
       .from('bookings')
       .select(`
-        id, booking_date, status,
-        patients ( patient_name, last_serology_date ),
+        id, 
+        booking_date, 
+        status,
+        patients ( 
+          last_serology_date,
+          users ( user_fullname ) 
+        ),
         branches ( branch_name )
       `)
       .eq('status', 'PENDING_REVIEW');
+      
     if (error) throw new Error(error.message);
     return data;
   },
