@@ -317,7 +317,7 @@ export default function PatientProfile() {
         </div>
 
         {/* 5. CLINICAL DIALYSIS PROFILE */}
-        <div>
+        {/* <div>
           <h2 className='text-xs font-black text-slate-400 uppercase tracking-widest mb-3 pl-1'>Clinical Profile</h2>
           <div className='bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden'>
             <div className='p-4 border-b border-slate-50 flex items-start gap-3'>
@@ -366,7 +366,7 @@ export default function PatientProfile() {
               </div>
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* 6. INFECTION STATUS GRID */}
         <div>
