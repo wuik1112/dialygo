@@ -422,12 +422,15 @@ export default function BranchManagement() {
 
             return (
               <div key={branch.id} className={`bg-white p-6 rounded-2xl border ${isActive ? 'border-slate-200' : 'border-red-100 bg-red-50/20'} shadow-sm flex flex-col hover:shadow-md transition-shadow`}>
-                <div className='flex justify-between items-start mb-4'>
-                  <h2 className='text-lg font-bold text-slate-800 truncate w-2/3'>{branch.branch_name}</h2>
-                  <span className={`px-3 py-1 text-[10px] uppercase tracking-widest font-bold rounded-full ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                
+                {/* --- FIX APPLIED HERE --- */}
+                <div className='flex justify-between items-start mb-4 gap-2'>
+                  <h2 className='text-lg font-bold text-slate-800 break-words flex-1'>{branch.branch_name}</h2>
+                  <span className={`shrink-0 px-3 py-1 text-[10px] uppercase tracking-widest font-bold rounded-full ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                     {branch.status || 'Active'}
                   </span>
                 </div>
+                {/* ------------------------ */}
                 
                 <div className='space-y-4 flex-1 mb-6'>
                   <div className='flex items-start gap-3'>
