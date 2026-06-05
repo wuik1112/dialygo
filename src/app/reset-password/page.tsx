@@ -52,7 +52,7 @@ export default function ResetPasswordPage() {
     } else {
       setMessage('Password updated successfully! Redirecting to login...');
       setTimeout(() => {
-        router.push('/login');
+        router.push('/');
       }, 2000);
     }
     setIsLoading(false);
