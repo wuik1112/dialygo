@@ -333,8 +333,7 @@ export default function PatientProfile() {
               <div>
                 <p className='text-xs font-bold text-slate-400'>Vascular Access</p>
                 <p className='text-sm font-black text-slate-800'>
-                  {profileData?.vascular_access_type || 'Unknown'} 
-                  {profileData?.vascular_access_location && <span className='text-slate-500 font-medium'> • {profileData.vascular_access_location}</span>}
+                  {profileData?.vascular_access_location && <span className='text-slate-500 font-medium'> • {profileData?.vascular_access_location}</span>}
                 </p>
               </div>
             </div>
