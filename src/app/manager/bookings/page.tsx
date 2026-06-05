@@ -63,17 +63,45 @@ export default function ManagerBookings() {
       
       const rawBookings = bookingData || [];
       const patientIds = [...new Set(rawBookings.map(b => b.patient_id).filter(Boolean))];
+      
+      // --- NEW: Time calculation for Auto-Expiry ---
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
       let finalBookings = rawBookings;
 
       if (patientIds.length > 0) {
         const { data: patientsData } = await supabase.from('patients').select('*, users(*), branches(branch_name)').in('patient_id', patientIds);
+        
         if (patientsData) {
-          finalBookings = rawBookings.map(booking => ({
-            ...booking,
-            patients: patientsData.find(p => p.patient_id === booking.patient_id) || null
-          }));
+          finalBookings = rawBookings.map(booking => {
+            let currentStatus = booking.booking_status;
+            const bDate = new Date(booking.booking_date);
+            bDate.setHours(0, 0, 0, 0);
+
+            // AUTO-EXPIRE LOGIC: If date passed and it's still pending, force it to 'Expired' in the UI
+            if (bDate < today && currentStatus.includes('Pending')) {
+              currentStatus = 'Expired';
+            }
+
+            return {
+              ...booking,
+              booking_status: currentStatus, // Overrides the status with our new logic
+              patients: patientsData.find(p => p.patient_id === booking.patient_id) || null
+            };
+          });
         }
+      } else {
+        // Apply auto-expire even if there are no patient profiles found
+        finalBookings = rawBookings.map(booking => {
+            let currentStatus = booking.booking_status;
+            const bDate = new Date(booking.booking_date);
+            bDate.setHours(0, 0, 0, 0);
+            if (bDate < today && currentStatus.includes('Pending')) currentStatus = 'Expired';
+            return { ...booking, booking_status: currentStatus };
+        });
       }
+      
       setBookings(finalBookings);
     } catch (err: any) {
       alert(`Error loading data: ${err.message}`); 
@@ -94,7 +122,17 @@ export default function ManagerBookings() {
 
       let reqData = null;
       if (selectedBooking.booking_status?.includes('Cancel') || selectedBooking.booking_status?.includes('Reschedule')) {
-        const { data } = await supabase.from('requests').select('*').eq('booking_id', selectedBooking.id).order('created_at', { ascending: false }).limit(1).single();
+        // CHANGED: Added error catching and changed .single() to .maybeSingle()
+        const { data, error } = await supabase
+          .from('requests')
+          .select('*')
+          .eq('booking_id', selectedBooking.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(); 
+          
+        if (error) console.error("Error fetching request details:", error);
+        
         reqData = data;
         setRequestDetails(data);
       } else {
@@ -132,6 +170,7 @@ export default function ManagerBookings() {
   }, [selectedBooking, managerBranchId]);
 
   // --- APPROVE / REJECT LOGIC ---
+  // --- APPROVE / REJECT LOGIC ---
   const handleAction = async (actionCategory: 'Approve' | 'Reject') => {
     if (actionCategory === 'Reject' && !rejectReason.trim()) {
       alert("Please provide a reason for rejection.");
@@ -149,33 +188,58 @@ export default function ManagerBookings() {
       let newDate: string | undefined;
       let newSession: string | undefined;
 
+      // 1. SAFELY GRAB THE EXACT REQUEST RECORD FIRST
+      const { data: reqData } = await supabase.from('requests')
+        .select('*')
+        .eq('booking_id', bookingId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
       if (actionCategory === 'Approve') {
         if (currentStatus === 'Pending Cancellation') {
           finalStatus = 'Cancelled'; 
-          await supabase.from('requests').update({ request_status: 'APPROVED', manager_id: managerBranchId }).eq('booking_id', bookingId).eq('request_status', 'PENDING');
         } else if (currentStatus === 'Pending Reschedule' || currentStatus?.includes('Reschedule')) {
-          const { data: reqData } = await supabase.from('requests').select('*').eq('booking_id', bookingId).eq('request_type', 'Reschedule').eq('request_status', 'PENDING').single();
+          finalStatus = 'Rescheduled'; 
           if (reqData) {
-            finalStatus = 'Rescheduled'; 
             newDate = reqData.request_new_date;
             newSession = reqData.request_new_session;
-            await supabase.from('requests').update({ request_status: 'APPROVED', manager_id: managerBranchId }).eq('id', reqData.id);
-          } else { finalStatus = 'Rescheduled'; }
+          }
         } else {
           finalStatus = 'Confirmed'; 
         }
+
+        // Save the Approval to the requests table
+        if (reqData) {
+          await supabase.from('requests')
+            .update({ request_status: 'APPROVED', manager_id: managerBranchId })
+            .eq('request_id', reqData.request_id); // <-- FIXED COLUMN NAME
+        }
+
       } else if (actionCategory === 'Reject') {
         if (currentStatus === 'Pending Cancellation') {
           finalStatus = 'Cancellation Rejected'; 
-          await supabase.from('requests').update({ request_status: 'REJECTED', manager_id: managerBranchId }).eq('booking_id', bookingId).eq('request_type', 'Cancel').eq('request_status', 'PENDING');
         } else if (currentStatus === 'Pending Reschedule' || currentStatus?.includes('Reschedule')) {
           finalStatus = 'Reschedule Rejected'; 
-          await supabase.from('requests').update({ request_status: 'REJECTED', manager_id: managerBranchId }).eq('booking_id', bookingId).eq('request_type', 'Reschedule').eq('request_status', 'PENDING');
         } else {
           finalStatus = 'Rejected'; 
         }
+
+        // Save the Rejection AND Manager Comment to the requests table
+        if (reqData) {
+          const { error: reqError } = await supabase.from('requests')
+            .update({ 
+              request_status: 'REJECTED', 
+              manager_id: managerBranchId, 
+              manager_comment: rejectReason 
+            })
+            .eq('request_id', reqData.request_id); // <-- FIXED COLUMN NAME
+            
+          if (reqError) throw reqError;
+        }
       }
 
+      // 2. Update the Bookings Table
       const updatePayload: any = { booking_status: finalStatus };
       if (newDate && newSession) {
         updatePayload.booking_date = newDate;
@@ -184,9 +248,11 @@ export default function ManagerBookings() {
       if (actionCategory === 'Approve' && !currentStatus.includes('Cancel') && selectedMachineId) {
         updatePayload.machine_id = parseInt(selectedMachineId);
       }
+      
       const { error: bookingUpdateError } = await supabase.from('bookings').update(updatePayload).eq('id', bookingId);
       if (bookingUpdateError) throw bookingUpdateError;
 
+      // 3. Send Notification to Patient
       if (patientUserId) {
         let msg = '';
         if (actionCategory === 'Approve') {
@@ -196,15 +262,7 @@ export default function ManagerBookings() {
             const bDate = newDate ? new Date(newDate) : new Date(selectedBooking.booking_date);
             const shiftTime = newSession || selectedBooking.booking_session_time;
             const branchName = selectedBooking.branches?.branch_name || 'the clinic';
-            
-            msg = `[CONFIRMED] Your ${selectedBooking.booking_type} request for ${bDate.toLocaleDateString('en-GB')} is now confirmed.\n\n` +
-                  `Location: ${branchName}\n` +
-                  `Shift: ${shiftTime}\n\n` +
-                  `Important Reminders:\n` +
-                  `- Please arrive 30 minutes before your shift starts.\n` +
-                  `- Bring your original IC and physical Referral Letter.\n` +
-                  `- Wear comfortable clothing with easy access to your fistula/vascular port.\n` +
-                  `- If you feel unwell before the session, contact the clinic immediately.`;
+            msg = `[CONFIRMED] Your ${selectedBooking.booking_type} request for ${bDate.toLocaleDateString('en-GB')} is now confirmed.\nLocation: ${branchName}\nShift: ${shiftTime}`;
           }
         } else {
           if (currentStatus === 'Pending Cancellation') {
@@ -212,12 +270,13 @@ export default function ManagerBookings() {
           } else if (currentStatus?.includes('Reschedule')) {
             msg = `Your reschedule request was declined. Reason: ${rejectReason}. Your original appointment date remains active.`;
           } else {
-            msg = `Your ${selectedBooking.booking_type} request was declined. Reason: ${rejectReason}. Please contact us or try another date.`;
+            msg = `Your request was declined. Reason: ${rejectReason}. Please contact us.`;
           }
         }
         await supabase.from('notifications').insert({ user_id: patientUserId, title: `Request ${actionCategory === 'Approve' ? 'Approved' : 'Declined'}`, message: msg });
       }
 
+      // 4. Update UI State
       setBookings(prev => prev.map(b => {
         if (b.id === bookingId) {
           return {
@@ -436,7 +495,6 @@ export default function ManagerBookings() {
             </div>
 
             <div className='flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50'>
-              {/* Highlight New Proposed Reschedule Date/Time to Manager */}
               {requestDetails?.request_type === 'Reschedule' && (
                 <div className='bg-purple-50 p-4 rounded-2xl border border-purple-200 shadow-sm'>
                   <h3 className='text-[10px] font-black text-purple-600 uppercase tracking-widest mb-2'>Requested Reschedule</h3>
@@ -454,6 +512,28 @@ export default function ManagerBookings() {
                   <p className='flex items-center gap-2'><span className='w-5'><FiDroplet className='text-red-400 text-lg' /></span> <span className='font-bold text-slate-700'>Type {selectedBooking.patients?.patient_blood_type || 'Unknown'}</span></p>
                 </div>
               </div>
+
+              {requestDetails?.request_reason && (
+                <div className='bg-slate-100 p-4 rounded-2xl border border-slate-200 shadow-inner'>
+                  <h3 className='text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1.5'>
+                    <FiMessageSquare /> Patient's Provided Reason
+                  </h3>
+                  <p className='text-sm font-bold text-slate-700 italic border-l-2 border-slate-400 pl-3 py-1'>
+                    "{requestDetails.request_reason}"
+                  </p>
+                </div>
+              )}
+
+              {selectedBooking.booking_status?.includes('Reject') && requestDetails?.manager_comment && (
+                <div className='bg-red-50 p-4 rounded-2xl border border-red-200 shadow-sm'>
+                  <h3 className='text-[10px] font-black text-red-600 uppercase tracking-widest mb-2 flex items-center gap-1.5'>
+                    <FiXCircle /> Manager's Rejection Reason
+                  </h3>
+                  <p className='text-sm font-bold text-red-800 leading-snug'>
+                    {requestDetails.manager_comment}
+                  </p>
+                </div>
+              )}
 
               <div className='bg-white p-4 rounded-2xl border border-slate-100 shadow-sm'>
                 <h3 className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3'>Infection Status</h3>
@@ -489,10 +569,17 @@ export default function ManagerBookings() {
                 </div>
               )}
 
-              <div className='bg-amber-50 p-4 rounded-2xl border border-amber-200 shadow-sm'>
-                <h3 className='text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-1.5'><FiAlertTriangle/> Machine Settings</h3>
-                <p className='text-xs font-bold text-amber-900 leading-relaxed'>Patient's home machine is <strong>{selectedBooking.patients?.preferred_machine_model || 'Unknown'}</strong>. Ensure Head Nurse reviews the Referral Letter for parameters.</p>
-              </div>
+              {/* MACHINE SETTINGS (Only visible for Confirmed Travel Requests) */}
+              {selectedBooking.booking_type === 'Travel' && ['Confirmed', 'Completed'].includes(selectedBooking.booking_status) && (
+                <div className='bg-amber-50 p-4 rounded-2xl border border-amber-200 shadow-sm'>
+                  <h3 className='text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-1.5'>
+                    <FiAlertTriangle/> Machine Settings
+                  </h3>
+                  <p className='text-xs font-bold text-amber-900 leading-relaxed'>
+                    Patient's home machine is <strong>{selectedBooking.patients?.preferred_machine_model || 'Unknown'}</strong>. Ensure Head Nurse reviews the Referral Letter for parameters.
+                  </p>
+                </div>
+              )}
             </div>
 
             {selectedBooking.booking_status?.includes('Pending') && (

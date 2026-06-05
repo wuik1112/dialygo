@@ -13,17 +13,20 @@ export default function ClinicalPatientRecord() {
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
   const [serologyDate, setSerologyDate] = useState('');
   const [nephrologistId, setNephrologistId] = useState<number | null>(null);
+
+  // --- NEW: Split Upload States & Refs ---
+  const [isUploadingSerology, setIsUploadingSerology] = useState(false);
+  const [isUploadingReferral, setIsUploadingReferral] = useState(false);
+  const serologyInputRef = useRef<HTMLInputElement>(null);
+  const referralInputRef = useRef<HTMLInputElement>(null);
 
   // Filtering States
   const [branches, setBranches] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [branchFilter, setBranchFilter] = useState('All');
   const [prescriptionFilter, setPrescriptionFilter] = useState('All');
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isClinicalModalOpen, setIsClinicalModalOpen] = useState(false);
   const [isUpdatingClinical, setIsUpdatingClinical] = useState(false);
@@ -35,7 +38,6 @@ export default function ClinicalPatientRecord() {
     preferred_machine: '',
     preferred_shift: ''
   });
-  // -----------------------------------------
 
   // Form State
   const [rxForm, setRxForm] = useState({
@@ -133,7 +135,7 @@ export default function ClinicalPatientRecord() {
       preferred_machine: patient.preferred_machine_model || '',
       preferred_shift: patient.preferred_shift || '',
       vascular_access: patient.prescriptions?.find((p: any) => p.status === 'Active')?.vascular_access_type || '',
-      vascular_access_location: patient.prescriptions?.find((p: any) => p.status === 'Active')?.vascular_access_location || '' // <-- ADDED THIS
+      vascular_access_location: patient.prescriptions?.find((p: any) => p.status === 'Active')?.vascular_access_location || ''
     });
     setIsClinicalModalOpen(true);
   };
@@ -144,7 +146,6 @@ export default function ClinicalPatientRecord() {
     setIsUpdatingClinical(true);
 
     try {
-      // A. Update the Intake Data in the patients table
       const { error: patientError } = await supabase
         .from('patients')
         .update({
@@ -156,12 +157,11 @@ export default function ClinicalPatientRecord() {
 
       if (patientError) throw patientError;
 
-      // B. Update the Medical Directive in the prescriptions table (Active prescription only)
       const { error: prescriptionError } = await supabase
         .from('prescriptions')
         .update({ 
           vascular_access_type: clinicalFormData.vascular_access,
-          vascular_access_location: clinicalFormData.vascular_access_location // <-- ADDED THIS
+          vascular_access_location: clinicalFormData.vascular_access_location
         })
         .eq('patient_id', clinicalFormData.patient_id)
         .eq('status', 'Active'); 
@@ -171,7 +171,6 @@ export default function ClinicalPatientRecord() {
       alert("Clinical Profile updated successfully!");
       setIsClinicalModalOpen(false);
       
-      // Refresh data
       await fetchClinicalData();
       
     } catch (error: any) {
@@ -180,22 +179,23 @@ export default function ClinicalPatientRecord() {
       setIsUpdatingClinical(false);
     }
   };
-  // ---------------------------------------------
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- NEW: Dynamic Dual-File Uploader ---
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'serology' | 'referral') => {
     if (!e.target.files || e.target.files.length === 0 || !selectedPatient) return;
     
-    if (!serologyDate) {
+    if (type === 'serology' && !serologyDate) {
       alert("Clinical Error: Please input the actual Serology Test Date from the lab report before uploading the document.");
       return;
     }
 
     const file = e.target.files[0];
-    setIsUploading(true);
+    const isSero = type === 'serology';
+    isSero ? setIsUploadingSerology(true) : setIsUploadingReferral(true);
 
     try {
       const fileExt = file.name.split('.').pop();
-      const fileName = `serology_${selectedPatient.patient_id}_${Date.now()}.${fileExt}`;
+      const fileName = `${type}_${selectedPatient.patient_id}_${Date.now()}.${fileExt}`;
       const filePath = `${selectedPatient.patient_id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage.from('patient_documents').upload(filePath, file);
@@ -203,26 +203,34 @@ export default function ClinicalPatientRecord() {
 
       const { data: { publicUrl } } = supabase.storage.from('patient_documents').getPublicUrl(filePath);
 
+      const updatePayload: any = {};
+      if (isSero) {
+        updatePayload.serology_report_url = publicUrl;
+        updatePayload.serology_document_status = 'Verified';
+        updatePayload.last_serology_date = serologyDate;
+        updatePayload.travel_status = 'Active';
+      } else {
+        updatePayload.referral_letter_url = publicUrl;
+        updatePayload.referral_document_status = 'Verified';
+      }
+
       const { error: updateError } = await supabase
         .from('patients')
-        .update({ 
-          serology_report_url: publicUrl,
-          serology_document_status: 'Verified',
-          last_serology_date: serologyDate, 
-          travel_status: 'Active'
-        })
+        .update(updatePayload)
         .eq('patient_id', selectedPatient.patient_id);
 
       if (updateError) throw updateError;
 
-      alert("Serology report uploaded and travel eligibility restored!");
+      alert(`${isSero ? 'Serology report' : 'Referral letter'} uploaded successfully!`);
+      
       fetchClinicalData();
-      setSelectedPatient({...selectedPatient, serology_report_url: publicUrl, last_serology_date: serologyDate, travel_status: 'Active'});
-      setSerologyDate(''); 
+      setSelectedPatient({...selectedPatient, ...updatePayload});
+      if (isSero) setSerologyDate(''); 
+      
     } catch (err: any) {
       alert("Upload failed: " + err.message);
     } finally {
-      setIsUploading(false);
+      isSero ? setIsUploadingSerology(false) : setIsUploadingReferral(false);
     }
   };
 
@@ -288,7 +296,6 @@ export default function ClinicalPatientRecord() {
     ?.filter((p: any) => p.status === 'Archived')
     ?.sort((a: any, b: any) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
-  // Helper to extract clinical details from the ACTIVE prescription
   const activeRx = selectedPatient?.prescriptions?.find((p: any) => p.status === 'Active');
 
   return (
@@ -379,7 +386,6 @@ export default function ClinicalPatientRecord() {
                     Blood: {selectedPatient.patient_blood_type || 'Unknown'} | HepB: {selectedPatient.hepatitis_b_status || 'Unknown'}
                   </span>
                   
-                  {/* NEW EDIT BUTTON */}
                   <button 
                     onClick={() => openClinicalModal(selectedPatient)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-[10px] font-bold rounded-lg hover:bg-slate-50 transition-colors print:hidden"
@@ -604,6 +610,7 @@ export default function ClinicalPatientRecord() {
                 <section className="space-y-8 animate-in fade-in print:hidden">
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* SEROLOGY UPLOAD CARD */}
                     <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 flex flex-col justify-between">
                       <div>
                         <h4 className="font-black text-blue-900 flex items-center gap-2 mb-1"><FiFileText /> Lab & Serology Reports</h4>
@@ -629,34 +636,46 @@ export default function ClinicalPatientRecord() {
                             </a>
                           )}
                           
-                          <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,application/pdf" />
+                          {/* Serology Input Ref */}
+                          <input type="file" ref={serologyInputRef} onChange={(e) => handleFileUpload(e, 'serology')} className="hidden" accept="image/*,application/pdf" />
                           <button 
-                            disabled={isUploading || !serologyDate} 
-                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploadingSerology || !serologyDate} 
+                            onClick={() => serologyInputRef.current?.click()}
                             className="text-xs px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-blue-300 disabled:cursor-not-allowed flex-1 justify-center"
                           >
-                            {isUploading ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
+                            {isUploadingSerology ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
                             {selectedPatient.serology_report_url ? "Update Document" : "Upload Document"}
                           </button>
                         </div>
                       </div>
                     </div>
 
+                    {/* REFERRAL LETTER UPLOAD CARD */}
                     <div className="bg-purple-50 border border-purple-100 rounded-2xl p-6 flex flex-col justify-between">
                       <div>
                         <h4 className="font-black text-purple-900 flex items-center gap-2 mb-1"><FiFileText /> Referral Letter</h4>
                         <p className="text-xs text-purple-700 font-medium">Status: {selectedPatient.referral_document_status || 'Missing'}</p>
                       </div>
-                      <div className="mt-4">
-                        {selectedPatient.referral_letter_url ? (
-                          <a href={selectedPatient.referral_letter_url} target="_blank" rel="noreferrer" className="w-full text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center justify-center gap-2 transition-colors">
-                            <FiCheckCircle /> View Referral Letter
-                          </a>
-                        ) : (
-                          <div className="w-full text-xs px-4 py-2.5 bg-purple-100/50 text-purple-500 font-bold rounded-xl border border-purple-200 flex items-center justify-center gap-2">
-                            <FiAlertCircle /> No Document Provided
-                          </div>
-                        )}
+
+                      <div className="mt-4 flex flex-col gap-3 justify-end h-full">
+                        <div className="flex gap-2 mt-auto">
+                          {selectedPatient.referral_letter_url && (
+                            <a href={selectedPatient.referral_letter_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center gap-2 transition-colors flex-1 justify-center">
+                              <FiCheckCircle /> View Active File
+                            </a>
+                          )}
+                          
+                          {/* Referral Input Ref */}
+                          <input type="file" ref={referralInputRef} onChange={(e) => handleFileUpload(e, 'referral')} className="hidden" accept="image/*,application/pdf" />
+                          <button 
+                            disabled={isUploadingReferral} 
+                            onClick={() => referralInputRef.current?.click()}
+                            className="text-xs px-4 py-2.5 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 flex items-center gap-2 transition-all active:scale-95 disabled:bg-purple-300 disabled:cursor-not-allowed flex-1 justify-center"
+                          >
+                            {isUploadingReferral ? <FiLoader className="animate-spin" /> : <FiUploadCloud />}
+                            {selectedPatient.referral_letter_url ? "Update Document" : "Upload Document"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

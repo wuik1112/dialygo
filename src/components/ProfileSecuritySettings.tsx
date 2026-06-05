@@ -142,37 +142,6 @@ export default function ProfileSecuritySettings() {
 
   return (
     <form onSubmit={handleSaveSettings} className='space-y-8 max-w-4xl mx-auto'>
-      {/* PERSONAL INFO CARD */}
-      <div className='bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'>
-        <div className='px-8 py-5 border-b border-slate-100 bg-slate-50/50'>
-          <h2 className='text-sm font-bold text-slate-800 uppercase tracking-wider'>Personal Information</h2>
-        </div>
-        <div className='p-8 space-y-6'>
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
-            <div>
-              <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>System Email Address (Uneditable)</label>
-              <input type='email' disabled value={formData.user_email} className='w-full p-3.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 font-medium cursor-not-allowed' />
-            </div>
-            <div>
-              <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Identity Card (Uneditable)</label>
-              <div className='w-full p-3.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 font-medium font-mono cursor-not-allowed'>
-                {formData.user_ic ? `XXXXXX-XX-${formData.user_ic.slice(-4)}` : 'N/A'}
-              </div>
-            </div>
-          </div>
-
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-100'>
-            <div>
-              <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Full Name</label>
-              <input type='text' name='fullname' required value={formData.fullname} onChange={handleInputChange} className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-800 transition-colors' />
-            </div>
-            <div>
-              <label className='block text-xs font-bold text-slate-500 uppercase mb-2'>Contact Number</label>
-              <input type='text' name='contact_number' value={formData.contact_number} onChange={handleInputChange} placeholder="e.g. 012-3456789" className='w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-800 transition-colors' />
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* SECURITY CARD */}
       <div className='bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'>

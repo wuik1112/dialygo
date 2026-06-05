@@ -207,7 +207,7 @@ export default function PatientProfile() {
           {(!hasSerologyDoc || !hasReferralDoc) && (
             <div className='bg-amber-100 text-amber-900 p-4 rounded-xl shadow-sm mb-3'>
               <p className='text-sm font-bold leading-snug'>Clinical Documents Missing.</p>
-              <p className='text-xs font-medium mt-1'>Your Home Centre Nurse must upload your clinical documents before you can book travel.</p>
+              <p className='text-xs font-medium mt-1'>Your Home Centre staff must upload your clinical documents before you can book travel.</p>
             </div>
           )}
 
