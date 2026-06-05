@@ -25,6 +25,18 @@ export default function ClinicalPatientRecord() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [isClinicalModalOpen, setIsClinicalModalOpen] = useState(false);
+  const [isUpdatingClinical, setIsUpdatingClinical] = useState(false);
+  const [clinicalFormData, setClinicalFormData] = useState({
+    patient_id: null as number | null,
+    blood_type: '',
+    vascular_access: '',
+    vascular_access_location: '',
+    preferred_machine: '',
+    preferred_shift: ''
+  });
+  // -----------------------------------------
+
   // Form State
   const [rxForm, setRxForm] = useState({
     session_frequency: '3', target_duration: '240', blood_flow_rate: '300',
@@ -70,6 +82,13 @@ export default function ClinicalPatientRecord() {
     });
 
     setPatients(processedPatients || []);
+    
+    // If a patient is already selected, update their data after fetching
+    if (selectedPatient) {
+      const updatedSelected = processedPatients?.find(p => p.patient_id === selectedPatient.patient_id);
+      if (updatedSelected) setSelectedPatient(updatedSelected);
+    }
+    
     setIsLoading(false);
   };
 
@@ -79,7 +98,7 @@ export default function ClinicalPatientRecord() {
     setSelectedPatient(patient);
     setIsEditing(false);
     
-    // Load the saved date from the database instead of forcing it to be blank!
+    // Load the saved date from the database
     setSerologyDate(patient.last_serology_date || ''); 
     
     const rx = patient.prescriptions?.find((p: any) => p.status === 'Active');
@@ -106,6 +125,62 @@ export default function ClinicalPatientRecord() {
       setRxForm({ ...rxForm, target_dry_weight: '' }); 
     }
   };
+
+  const openClinicalModal = (patient: any) => {
+    setClinicalFormData({
+      patient_id: patient.patient_id,
+      blood_type: patient.patient_blood_type || '',
+      preferred_machine: patient.preferred_machine_model || '',
+      preferred_shift: patient.preferred_shift || '',
+      vascular_access: patient.prescriptions?.find((p: any) => p.status === 'Active')?.vascular_access_type || '',
+      vascular_access_location: patient.prescriptions?.find((p: any) => p.status === 'Active')?.vascular_access_location || '' // <-- ADDED THIS
+    });
+    setIsClinicalModalOpen(true);
+  };
+
+  const handleUpdateClinicalProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clinicalFormData.patient_id) return;
+    setIsUpdatingClinical(true);
+
+    try {
+      // A. Update the Intake Data in the patients table
+      const { error: patientError } = await supabase
+        .from('patients')
+        .update({
+          patient_blood_type: clinicalFormData.blood_type,
+          preferred_machine_model: clinicalFormData.preferred_machine,
+          preferred_shift: clinicalFormData.preferred_shift
+        })
+        .eq('patient_id', clinicalFormData.patient_id);
+
+      if (patientError) throw patientError;
+
+      // B. Update the Medical Directive in the prescriptions table (Active prescription only)
+      const { error: prescriptionError } = await supabase
+        .from('prescriptions')
+        .update({ 
+          vascular_access_type: clinicalFormData.vascular_access,
+          vascular_access_location: clinicalFormData.vascular_access_location // <-- ADDED THIS
+        })
+        .eq('patient_id', clinicalFormData.patient_id)
+        .eq('status', 'Active'); 
+
+      if (prescriptionError) throw prescriptionError;
+
+      alert("Clinical Profile updated successfully!");
+      setIsClinicalModalOpen(false);
+      
+      // Refresh data
+      await fetchClinicalData();
+      
+    } catch (error: any) {
+      alert("Error updating profile: " + error.message);
+    } finally {
+      setIsUpdatingClinical(false);
+    }
+  };
+  // ---------------------------------------------
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !selectedPatient) return;
@@ -299,11 +374,20 @@ export default function ClinicalPatientRecord() {
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="px-3 py-1 bg-red-50 text-red-600 rounded-lg text-[10px] font-black uppercase tracking-widest block mb-2 print:border print:border-black print:bg-white print:text-black">
-                    Blood: {selectedPatient.patient_blood_type} | HepB: {selectedPatient.hepatitis_b_status}
+                <div className="text-right flex flex-col items-end gap-2">
+                  <span className="px-3 py-1 bg-red-50 text-red-600 rounded-lg text-[10px] font-black uppercase tracking-widest block print:border print:border-black print:bg-white print:text-black">
+                    Blood: {selectedPatient.patient_blood_type || 'Unknown'} | HepB: {selectedPatient.hepatitis_b_status || 'Unknown'}
                   </span>
-                  <p className="text-xs font-bold text-slate-600 print:text-black">Primary Dx: <span className="text-slate-900 print:text-black">{activeRx?.primary_diagnosis || 'Not recorded'}</span></p>
+                  
+                  {/* NEW EDIT BUTTON */}
+                  <button 
+                    onClick={() => openClinicalModal(selectedPatient)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-[10px] font-bold rounded-lg hover:bg-slate-50 transition-colors print:hidden"
+                  >
+                    <FiEdit2 /> Edit Clinical Profile
+                  </button>
+                  
+                  <p className="text-xs font-bold text-slate-600 print:text-black mt-1">Primary Dx: <span className="text-slate-900 print:text-black">{activeRx?.primary_diagnosis || 'Not recorded'}</span></p>
                 </div>
               </div>
             </div>
@@ -640,6 +724,117 @@ export default function ClinicalPatientRecord() {
           </div>
         )}
       </div>
+
+      {/* --- NEW: Clinical Profile Edit Modal --- */}
+      {isClinicalModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+            
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h2 className="text-lg font-bold text-slate-800">Update Clinical Profile</h2>
+              <button onClick={() => setIsClinicalModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+            </div>
+            
+            <form onSubmit={handleUpdateClinicalProfile} className="p-6 space-y-4">
+              
+              {/* Blood Type */}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Blood Type</label>
+                <select 
+                  required
+                  value={clinicalFormData.blood_type} 
+                  onChange={e => setClinicalFormData({...clinicalFormData, blood_type: e.target.value})}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-700"
+                >
+                  <option value="">Select Blood Type...</option>
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                  <option value="Unknown">Unknown</option>
+                </select>
+              </div>
+
+              {/* Vascular Access */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Vascular Access Type */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Vascular Access Type</label>
+                  <select 
+                    required
+                    value={clinicalFormData.vascular_access} 
+                    onChange={e => setClinicalFormData({...clinicalFormData, vascular_access: e.target.value})}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-700"
+                  >
+                    <option value="">Select Access Type...</option>
+                    <option value="AV Fistula">AV Fistula</option>
+                    <option value="AV Graft">AV Graft</option>
+                    <option value="Central Venous Catheter">Central Venous Catheter</option>
+                    <option value="Unknown">Unknown / Pending</option>
+                  </select>
+                </div>
+
+                {/* Vascular Access Location */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Access Location</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Left Forearm"
+                    value={clinicalFormData.vascular_access_location} 
+                    onChange={e => setClinicalFormData({...clinicalFormData, vascular_access_location: e.target.value})}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-700"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Machine Model */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Usual Machine</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Fresenius 5008S"
+                    value={clinicalFormData.preferred_machine} 
+                    onChange={e => setClinicalFormData({...clinicalFormData, preferred_machine: e.target.value})}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-700"
+                  />
+                </div>
+
+                {/* Preferred Shift */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Usual Shift</label>
+                  <select 
+                    value={clinicalFormData.preferred_shift} 
+                    onChange={e => setClinicalFormData({...clinicalFormData, preferred_shift: e.target.value})}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium text-slate-700"
+                  >
+                    <option value="">Select Shift...</option>
+                    <option value="Morning (08:00 - 12:00)">Morning (08:00 - 12:00)</option>
+                    <option value="Afternoon (13:00 - 17:00)">Afternoon (13:00 - 17:00)</option>
+                    <option value="Evening (18:00 - 22:00)">Evening (18:00 - 22:00)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setIsClinicalModalOpen(false)} className="flex-1 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" disabled={isUpdatingClinical} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:bg-blue-300 transition-all shadow-md shadow-blue-500/20">
+                  {isUpdatingClinical ? 'Saving...' : 'Save Clinical Profile'}
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ------------------------------------------- */}
+
     </main>
   );
 }
