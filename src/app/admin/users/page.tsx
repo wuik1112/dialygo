@@ -13,24 +13,21 @@ const roleMap: Record<number, string> = {
 };
 
 const extractDOBFromIC = (icString: string) => {
-    // Make sure we have at least 6 characters before trying to parse
     if (!icString || icString.length < 6) return null;
     
     const yy = parseInt(icString.substring(0, 2), 10);
     const mm = icString.substring(2, 4);
     const dd = icString.substring(4, 6);
     
-    // Determine the century (Assuming any YY above the current year's last 2 digits is from the 1900s)
     const currentYearTwoDigits = new Date().getFullYear() % 100;
     const fullYear = yy > currentYearTwoDigits ? `19${icString.substring(0,2)}` : `20${icString.substring(0,2)}`;
     
-    return `${fullYear}-${mm}-${dd}`; // Returns format: YYYY-MM-DD
+    return `${fullYear}-${mm}-${dd}`; 
   };
 
 const libraries: any = ['places'];
 const defaultCenter = { lat: 5.4141, lng: 100.3288 };
 
-// Helper to safely extract Supabase relational data whether it returns as an array or object
 const getRelationalData = (data: any) => Array.isArray(data) ? data[0] : data;
 
 export default function UserManagement() {
@@ -38,7 +35,6 @@ export default function UserManagement() {
   const [branches, setBranches] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Google Maps Script
   const { isLoaded } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string,
     libraries: libraries,
@@ -96,7 +92,6 @@ export default function UserManagement() {
     fetchData();
   }, []);
 
-  // Reset to page 1 whenever filters are changed
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, filterStatus, filterRole, filterBranch]);
@@ -105,7 +100,6 @@ export default function UserManagement() {
     const { name, value } = e.target;
     let newValue = value;
 
-    // RESTRICT: Numbers only for specific fields
     if (name === 'contact_number' || name === 'max_hours' || name === 'ic') {
       newValue = value.replace(/\D/g, ''); 
     }
@@ -117,7 +111,6 @@ export default function UserManagement() {
   const validateField = (name: string, value: string) => {
     let err = '';
 
-    // --- IC Validation (12 digits + Uniqueness) ---
     if (name === 'ic') {
       if (value.length > 0 && value.length !== 12) {
         err = 'IC must be exactly 12 digits.';
@@ -126,7 +119,6 @@ export default function UserManagement() {
       }
     }
 
-    // --- Phone Validation (10-11 digits + Uniqueness) ---
     if (name === 'contact_number') {
       if (value.length > 0 && (value.length < 10 || value.length > 11)) {
         err = 'Phone must be 10-11 digits.';
@@ -135,7 +127,6 @@ export default function UserManagement() {
       }
     }
 
-    // --- Email Validation (Format + Uniqueness) ---
     if (name === 'email') {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (value.length > 0 && !emailRegex.test(value)) {
@@ -145,7 +136,6 @@ export default function UserManagement() {
       }
     }
 
-    // --- Numeric Fields (General Example: Max Hours) ---
     if (name === 'max_hours' && isNaN(Number(value))) {
       err = 'Please enter numbers only.';
     }
@@ -184,7 +174,6 @@ export default function UserManagement() {
     setEditingId(user.user_id);
     setFieldErrors({});
     
-    // Use the helper to safely extract the data whether it's an array or object
     const pData = getRelationalData(user.patients);
     const sData = getRelationalData(user.staff);
 
@@ -235,8 +224,8 @@ export default function UserManagement() {
     }
 
     const patientDob = extractDOBFromIC(formData.ic.trim());
-
     const roleIdNum = parseInt(formData.role_id);
+    
     const userPayload: any = {
       user_email: formData.email.trim(),
       user_fullname: formData.fullname.trim(),
@@ -260,8 +249,19 @@ export default function UserManagement() {
           });
           if (!authRes.ok) throw new Error("Auth update failed.");
         }
+        
         const { error: uErr } = await supabase.from('users').update(userPayload).eq('user_id', editingId);
         if (uErr) throw uErr;
+
+        // --- NEW: Profile Update Notification ---
+        await supabase.from('notifications').insert([{
+          user_id: editingId,
+          title: 'Profile Updated',
+          message: 'Your official profile information has been securely updated by an administrator. Please review your settings if you have any questions.',
+          type: 'System',
+          is_read: false
+        }]);
+
       } else {
         const authRes = await fetch('/api/admin/create-user', {
           method: 'POST',
@@ -281,6 +281,26 @@ export default function UserManagement() {
           
         if (insertError) throw insertError;
         targetUserId = newUser[0].user_id;
+
+        // --- NEW: Account Creation In-App Notification ---
+        await supabase.from('notifications').insert([{
+          user_id: targetUserId,
+          title: 'Welcome to DialyGo',
+          message: 'Your account has been officially registered. You can now log in and start using the app.',
+          type: 'System',
+          is_read: false
+        }]);
+
+        // --- NEW: Account Creation Email Trigger ---
+        fetch('/api/admin/notify-manager', { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: formData.email.trim(),
+            fullname: formData.fullname.trim(),
+            action: 'creation'
+          })
+        }).catch(err => console.error("Welcome email trigger failed", err));
       }
       
       if (roleIdNum === 5) {
@@ -298,7 +318,6 @@ export default function UserManagement() {
           max_weekly_hours: parseInt(formData.max_hours),
           employment_status: formData.employment_status
         };
-        // Removed duplicated database call
         const { error } = await supabase.from('staff').upsert([sPayload], { onConflict: 'user_id' });
         if (error) console.error("Update error:", error);
       }
@@ -317,37 +336,45 @@ export default function UserManagement() {
   };
 
   const toggleUserStatus = async (user: any) => {
-    const action = user.user_is_active ? 'Deactivate' : 'Reactivate';
+    // Determine the *new* state based on current state
+    const newStatus = !user.user_is_active;
+    const actionName = newStatus ? 'Reactivate' : 'Deactivate';
     
-    if (window.confirm(`${action} account for ${user.user_fullname}?`)) {
+    if (window.confirm(`${actionName} account for ${user.user_fullname}?`)) {
       try {
         const { error: updateError } = await supabase
           .from('users')
-          .update({ user_is_active: !user.user_is_active })
+          .update({ user_is_active: newStatus })
           .eq('user_id', user.user_id);
 
         if (updateError) throw updateError;
 
-        if (!user.user_is_active) {
-          const emailRes = await fetch('/api/admin/notify-reactivation', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              email: user.user_email, 
-              fullname: user.user_fullname 
-            })
-          });
+        // --- NEW: In-App Notification for Status Change ---
+        await supabase.from('notifications').insert([{
+          user_id: user.user_id,
+          title: `Account ${newStatus ? 'Reactivated' : 'Deactivated'}`,
+          message: `Your account access has been ${newStatus ? 'restored' : 'suspended'} by an administrator.`,
+          type: 'System',
+          is_read: false
+        }]);
 
-          if (!emailRes.ok) {
-             console.warn("Account reactivated, but failed to send email.");
-          }
+        // --- NEW: Email Notification for Status Change ---
+        const emailRes = await fetch('/api/admin/notify-reactivation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            email: user.user_email, 
+            fullname: user.user_fullname,
+            status: newStatus ? 'reactivated' : 'deactivated'
+          })
+        });
 
-          setSuccessMessage(`${user.user_fullname}'s account reactivated and notification email sent.`);
-        } else {
-          setSuccessMessage(`${user.user_fullname}'s account deactivated successfully.`);
+        if (!emailRes.ok) {
+           console.warn("Account status changed, but failed to send email.");
         }
 
-        setTimeout(() => setSuccessMessage(''), 5000); // Clear message after 5 seconds
+        setSuccessMessage(`${user.user_fullname}'s account ${newStatus ? 'reactivated' : 'deactivated'} and notification email sent.`);
+        setTimeout(() => setSuccessMessage(''), 5000);
         await fetchData();
         
       } catch (err: any) {
@@ -361,7 +388,6 @@ export default function UserManagement() {
     setSortConfig({ key, direction });
   };
 
-  // Fixed filtering logic with proper type casting and null checks
   const filteredUsers = users.filter(u => {
     const fullName = u.user_fullname || '';
     const ic = u.user_ic || '';
@@ -416,7 +442,6 @@ export default function UserManagement() {
           </div>
         )}
 
-        {/* Filters Panel */}
         <div className='bg-white p-5 rounded-2xl shadow-sm border border-slate-200 mb-6 grid grid-cols-1 md:grid-cols-4 gap-4'>
             <input type="text" placeholder="Search Directory..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className='w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-blue-500' />
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className='w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none'>
@@ -435,7 +460,6 @@ export default function UserManagement() {
             </select>
         </div>
 
-        {/* Table Data */}
         <div className='bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'>
           <table className='min-w-full divide-y divide-slate-200'>
             <thead className='bg-slate-50'>
@@ -466,7 +490,6 @@ export default function UserManagement() {
                   <td className='px-6 py-4'>
                     <span className='px-2 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded uppercase'>{roleMap[user.role_id]}</span>
                     
-                    {/* Added the license number display to the main interface table */}
                     {getRelationalData(user.staff)?.professional_license_number && (
                       <span className='ml-2 text-[10px] text-slate-400 font-mono'>
                         Lic: {getRelationalData(user.staff).professional_license_number}

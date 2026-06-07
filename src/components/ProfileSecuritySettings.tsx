@@ -6,7 +6,6 @@ import {
   FiCheckCircle, FiXCircle 
 } from 'react-icons/fi';
 
-// Helper component for the password checklist
 const CheckItem = ({ isValid, text }: { isValid: boolean, text: string }) => (
   <li className={`flex items-center gap-2 transition-colors ${isValid ? 'text-emerald-600 font-bold' : 'text-slate-500'}`}>
     {isValid ? <FiCheckCircle className="text-emerald-500" /> : <div className='w-3 h-3 rounded-full border border-slate-300' />}
@@ -33,13 +32,12 @@ export default function ProfileSecuritySettings() {
   const [hasChanges, setHasChanges] = useState(false);
   const [passwordVerification, setPasswordVerification] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
 
-  // Load the current user data automatically on mount
   useEffect(() => {
     const fetchUser = async () => {
       const { data: session } = await supabase.auth.getSession();
       if (!session?.session) return;
       
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('users')
         .select('*')
         .eq('user_email', session.session.user.email)
@@ -64,29 +62,27 @@ export default function ProfileSecuritySettings() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     setHasChanges(true);
     if (e.target.name === 'current_password') {
-      setPasswordVerification('idle'); // Reset verification if they type again
+      setPasswordVerification('idle'); 
     }
   };
 
+  // --- FIXED: Verify password securely via Auth Engine, NOT public tables ---
   const handleCurrentPasswordBlur = async () => {
-    if (!formData.current_password || !userId) return;
+    if (!formData.current_password || !formData.user_email) return;
     setPasswordVerification('checking');
     
-    // Verify current password against database
-    const { data } = await supabase
-      .from('users')
-      .select('user_password')
-      .eq('user_id', userId)
-      .single();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: formData.user_email,
+      password: formData.current_password,
+    });
       
-    if (data && data.user_password === formData.current_password) {
+    if (!error) {
       setPasswordVerification('valid');
     } else {
       setPasswordVerification('invalid');
     }
   };
 
-  // Password Security Theory
   const isLengthValid = formData.new_password.length >= 8;
   const isUpperValid = /[A-Z]/.test(formData.new_password);
   const isLowerValid = /[a-z]/.test(formData.new_password);
@@ -112,28 +108,39 @@ export default function ProfileSecuritySettings() {
     setIsSaving(true);
     setMessage({ type: '', text: '' });
 
+    // 1. Save standard profile data to the database
     const payload: any = {
       user_fullname: formData.fullname,
       user_contact_number: formData.contact_number
     };
 
-    if (formData.new_password) {
-      payload.user_password = formData.new_password;
+    const { error: dbError } = await supabase.from('users').update(payload).eq('user_id', userId);
+
+    if (dbError) {
+      setMessage({ type: 'error', text: dbError.message });
+      setIsSaving(false);
+      return;
     }
 
-    const { error } = await supabase.from('users').update(payload).eq('user_id', userId);
+    // 2. FIXED: Save the actual new password to the Supabase Auth Engine
+    if (formData.new_password) {
+      const { error: authError } = await supabase.auth.updateUser({
+        password: formData.new_password
+      });
+
+      if (authError) {
+        setMessage({ type: 'error', text: "Profile updated, but password change failed: " + authError.message });
+        setIsSaving(false);
+        return;
+      }
+    }
 
     setIsSaving(false);
-
-    if (error) {
-      setMessage({ type: 'error', text: error.message });
-    } else {
-      setMessage({ type: 'success', text: 'Settings updated successfully!' });
-      setHasChanges(false);
-      setFormData(prev => ({ ...prev, current_password: '', new_password: '', confirm_password: '' }));
-      setPasswordVerification('idle');
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-    }
+    setMessage({ type: 'success', text: 'Settings updated successfully!' });
+    setHasChanges(false);
+    setFormData(prev => ({ ...prev, current_password: '', new_password: '', confirm_password: '' }));
+    setPasswordVerification('idle');
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   };
 
   if (isLoading) {

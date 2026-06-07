@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { FiActivity } from 'react-icons/fi';
 import { validateBookingRule } from '@/utils/validationHelpers';
-import { broadcastNotification } from '@/utils/notificationService';
 
 export default function SystemRules() {
   const [rules, setRules] = useState<any[]>([]);
@@ -53,7 +52,7 @@ export default function SystemRules() {
       return;
     }
 
-// 1. Map the database rule name to the key expected by our Jest function
+    // 1. Map the database rule name to the key expected by our Jest function
     const ruleKey = rule.rule_name === 'Cancellation Cut-off Hours' ? 'cancellation_cutoff' : rule.rule_name;
     
     // 2. Run the pure math function
@@ -68,7 +67,6 @@ export default function SystemRules() {
       setSavingId(null);
       return;
     }
-
 
     if (rule.rule_name === 'Global Max Capacity Per Branch') {
       const { data: bookingCounts, error: countError } = await supabase
@@ -109,17 +107,30 @@ export default function SystemRules() {
       }, 3000);
       
       setRules(prevRules => prevRules.map(r => r.rule_id === rule.rule_id ? { ...r, rule_value: numericValue } : r));
-    }
+
+      try {
+        const { data: allActiveUsers } = await supabase
+          .from('users')
+          .select('user_id')
+          .eq('user_is_active', true);
+
+        if (allActiveUsers && allActiveUsers.length > 0) {
+           const broadcastPayload = allActiveUsers.map(user => ({
+            user_id: user.user_id,
+            title: "System Rule Updated",
+            message: `The HQ Administrator has updated the system parameter "${rule.rule_name}" to a new value of ${numericValue}.`,
+            type: 'System',
+            is_read: false
+          }));
+
+          await supabase.from('notifications').insert(broadcastPayload);
+        }
+      } catch (broadcastErr) {
+        console.error("Failed to broadcast rule update:", broadcastErr);
+      }
+   }
     
     setSavingId(null);
-
-    await fetch('/api/admin/broadcast', {
-    method: 'POST',
-    body: JSON.stringify({
-      title: "System Rules Updated",
-      message: "The HQ Administrator has updated the system booking parameters. Please review the changes."
-    })
-  });
   };
 
   if (isLoading) {

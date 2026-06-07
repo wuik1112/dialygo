@@ -311,18 +311,23 @@ export default function BranchManagement() {
       const { data: newBranchData, error: insertError } = await supabase.from('branches').insert([payload]).select();
       
       if (insertError) {
-        if (insertError.message.includes('branches_pkey')) {
-          setError('System Error: Database ID conflict. Please run the SQL reset script to resync the ID counter.');
-        } else {
-          setError(`Creation failed: ${insertError.message}`);
-        }
+        setError(`Creation failed: ${insertError.message}`);
         setIsSubmitting(false);
         return;
       }
 
       if (newManagerId && newBranchData && newBranchData.length > 0) {
         const generatedBranchId = newBranchData[0].id;
+        
         await supabase.from('users').update({ branch_id: generatedBranchId }).eq('user_id', newManagerId);
+
+        await supabase.from('notifications').insert([{
+          user_id: newManagerId,
+          title: 'New Branch Assignment',
+          message: `You have been officially assigned as the Branch Manager for the newly created facility: ${formData.name.trim()}.`,
+          type: 'System',
+          is_read: false
+        }]);
       }
     }
 

@@ -95,8 +95,7 @@ export default function Sidebar() {
       { title: 'Machine Status', url: '/manager/machines', icon: FiMonitor }
     ],
     Nephrologist: [
-      { title: 'Dashboard', url: '/nephrologist', icon: FiTrendingUp },
-      { title: 'Patients Directory', url: '/nephrologist/patients', icon: FiUsers },
+      { title: 'Patients Directory', url: '/nephrologist', icon: FiUsers },
     ],
     Nurse: [
       { title: 'Today Schedule', url: '/nurse', icon: FiClock },
