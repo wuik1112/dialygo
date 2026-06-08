@@ -57,7 +57,8 @@ function MonitorContent() {
         if (userData) setCurrentNurseId(userData.user_id);
       }
 
-      const { data: treatmentData } = await supabase.from('treatments').select(`*, patients(users(user_fullname, user_ic), prescriptions(status, target_duration))`).eq('patient_id', patientId).eq('session_status', 'Ongoing').single();
+      // UPGRADED: Explicitly fetch user_id from the patients table for the notification system
+      const { data: treatmentData } = await supabase.from('treatments').select(`*, patients(user_id, users(user_fullname, user_ic), prescriptions(status, target_duration))`).eq('patient_id', patientId).eq('session_status', 'Ongoing').single();
 
       if (treatmentData) {
         setTreatment(treatmentData);
@@ -104,7 +105,7 @@ function MonitorContent() {
     e.preventDefault();
     const hourlyValidation = validateHourlyVitals(newLog.bp_sys, newLog.bp_dia, newLog.vp, newLog.tmp, newLog.uf_rate, newLog.bf);
     if (!hourlyValidation.isValid) {
-      alert(hourlyValidation.errorMessage); // Block the save and warn the nurse!
+      alert(hourlyValidation.errorMessage); 
       return;
     }
     setIsLogging(true);
@@ -143,7 +144,7 @@ function MonitorContent() {
   const requiresExplanation = isUfMismatch || isOverrideActive || dischargeForm.complications.includes('PAUSED');
   const hasRequiredExplanation = requiresExplanation ? (dischargeForm.complications.length > 10) : true;
 
-const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, dischargeForm.bp_dia, dischargeForm.post_hr, dischargeForm.post_weight);
+  const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, dischargeForm.bp_dia, dischargeForm.post_hr, dischargeForm.post_weight);
   const isDischargeValid = hemostasisAchieved && needlesIntact && dischargeForm.post_weight !== '' && hasRequiredExplanation && !isPaused && vitalsValidation.isValid;
 
   const handleDischarge = async (e: React.FormEvent) => {
@@ -162,10 +163,28 @@ const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, discharge
         injections: dischargeForm.injections || null, session_complications: dischargeForm.complications || null,
         hemostasis_achieved: hemostasisAchieved, needles_intact: needlesIntact, discharged_by: currentNurseId
       };
+      
       const { error } = await supabase.from('treatments').update(payload).eq('session_id', treatment.session_id);
       if (error) throw error;
+      
       const finalBookingId = bookingId || treatment.booking_id;
-      if (finalBookingId) await supabase.from('bookings').update({ booking_status: 'Completed' }).eq('id', finalBookingId);
+      if (finalBookingId) {
+        await supabase.from('bookings').update({ booking_status: 'Completed' }).eq('id', finalBookingId);
+      }
+
+      // --- NEW: Discharge Notification to Patient ---
+      const patientUserId = treatment.patients?.user_id;
+      if (patientUserId) {
+        await supabase.from('notifications').insert([{
+          user_id: patientUserId,
+          title: 'Treatment Completed & Discharged',
+          message: 'Your dialysis session is complete and you have been successfully discharged by the nursing staff. Please rest well and hydrate carefully!',
+          type: 'System',
+          is_read: false
+        }]);
+      }
+      // ----------------------------------------------
+
       router.push('/nurse/logs'); 
     } catch (error: any) {
       alert("Error saving discharge logs: " + error.message);
@@ -173,7 +192,6 @@ const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, discharge
     }
   };
 
-  // --- HELPER: Formats minutes into "2h 15m" ---
   const formatTimeHM = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = mins % 60;
@@ -193,7 +211,6 @@ const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, discharge
           </div>
         </div>
 
-        {/* --- UPGRADED HEADER BADGES --- */}
         <div className="flex items-center gap-3">
           <div className="bg-white text-slate-700 px-4 py-2 rounded-xl text-xs font-black tracking-widest flex items-center gap-2 border border-slate-200 shadow-sm shrink-0">
             <FiClock className="text-lg text-blue-500" /> {formatTimeHM(elapsedMinutes)} Elapsed
@@ -314,7 +331,6 @@ const vitalsValidation = validateDischargeVitals(dischargeForm.bp_sys, discharge
                 {isPaused ? <FiPauseCircle className="text-6xl text-red-500 mx-auto mb-4 animate-pulse" /> : <FiClock className="text-6xl text-blue-500 mx-auto mb-4 animate-pulse" />}
                 <h4 className="text-white font-black text-xl mb-1">{isPaused ? "Treatment Paused" : "Dialysis in Progress"}</h4>
                 
-                {/* --- UPGRADED REMAINING TIME TEXT --- */}
                 <p className="text-slate-400 font-bold mb-6">
                   {formatTimeHM(Math.max(targetMinutes - elapsedMinutes, 0))} remaining of {formatTimeHM(targetMinutes)} prescription.
                 </p>

@@ -58,13 +58,12 @@ export default function ManagerBookings() {
       if (userError) throw userError;
       setManagerBranchId(userData.branch_id);
 
-      const { data: bookingData, error: bookingError } = await supabase.from('bookings').select('*').eq('branch_id', userData.branch_id);
+      const { data: bookingData, error: bookingError } = await supabase.from('bookings').select('*, branches(branch_name)').eq('branch_id', userData.branch_id);
       if (bookingError) throw bookingError;
       
       const rawBookings = bookingData || [];
       const patientIds = [...new Set(rawBookings.map(b => b.patient_id).filter(Boolean))];
       
-      // --- NEW: Time calculation for Auto-Expiry ---
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
@@ -79,20 +78,18 @@ export default function ManagerBookings() {
             const bDate = new Date(booking.booking_date);
             bDate.setHours(0, 0, 0, 0);
 
-            // AUTO-EXPIRE LOGIC: If date passed and it's still pending, force it to 'Expired' in the UI
             if (bDate < today && currentStatus.includes('Pending')) {
               currentStatus = 'Expired';
             }
 
             return {
               ...booking,
-              booking_status: currentStatus, // Overrides the status with our new logic
+              booking_status: currentStatus, 
               patients: patientsData.find(p => p.patient_id === booking.patient_id) || null
             };
           });
         }
       } else {
-        // Apply auto-expire even if there are no patient profiles found
         finalBookings = rawBookings.map(booking => {
             let currentStatus = booking.booking_status;
             const bDate = new Date(booking.booking_date);
@@ -110,7 +107,6 @@ export default function ManagerBookings() {
     }
   };
 
-  // --- DOUBLE-BOOKING PREVENTION & DETAILS FETCHER ---
   useEffect(() => {
     async function loadDetails() {
       if (!selectedBooking) {
@@ -122,7 +118,6 @@ export default function ManagerBookings() {
 
       let reqData = null;
       if (selectedBooking.booking_status?.includes('Cancel') || selectedBooking.booking_status?.includes('Reschedule')) {
-        // CHANGED: Added error catching and changed .single() to .maybeSingle()
         const { data, error } = await supabase
           .from('requests')
           .select('*')
@@ -139,7 +134,6 @@ export default function ManagerBookings() {
         setRequestDetails(null);
       }
 
-      // Fetch FREE Machines for the SPECIFIC Date and Shift (Using Requested Reschedule Date if Applicable)
       if (managerBranchId && !selectedBooking.booking_status?.includes('Cancel')) {
         const targetDate = reqData?.request_new_date || selectedBooking.booking_date;
         const targetSession = reqData?.request_new_session || selectedBooking.booking_session_time;
@@ -150,7 +144,7 @@ export default function ManagerBookings() {
           .eq('branch_id', managerBranchId)
           .eq('booking_date', targetDate)
           .eq('booking_session_time', targetSession)
-          .in('booking_status', ['Confirmed', 'Rescheduled', 'Completed']);
+          .in('booking_status', ['Confirmed', 'Rescheduled', 'Completed', 'In Progress']);
         
         const bookedMachineIds = bookedSlots?.map(b => b.machine_id).filter(Boolean) || [];
 
@@ -169,8 +163,6 @@ export default function ManagerBookings() {
     loadDetails();
   }, [selectedBooking, managerBranchId]);
 
-  // --- APPROVE / REJECT LOGIC ---
-  // --- APPROVE / REJECT LOGIC ---
   const handleAction = async (actionCategory: 'Approve' | 'Reject') => {
     if (actionCategory === 'Reject' && !rejectReason.trim()) {
       alert("Please provide a reason for rejection.");
@@ -188,7 +180,6 @@ export default function ManagerBookings() {
       let newDate: string | undefined;
       let newSession: string | undefined;
 
-      // 1. SAFELY GRAB THE EXACT REQUEST RECORD FIRST
       const { data: reqData } = await supabase.from('requests')
         .select('*')
         .eq('booking_id', bookingId)
@@ -209,11 +200,10 @@ export default function ManagerBookings() {
           finalStatus = 'Confirmed'; 
         }
 
-        // Save the Approval to the requests table
         if (reqData) {
           await supabase.from('requests')
             .update({ request_status: 'APPROVED', manager_id: managerBranchId })
-            .eq('request_id', reqData.request_id); // <-- FIXED COLUMN NAME
+            .eq('request_id', reqData.request_id);
         }
 
       } else if (actionCategory === 'Reject') {
@@ -225,7 +215,6 @@ export default function ManagerBookings() {
           finalStatus = 'Rejected'; 
         }
 
-        // Save the Rejection AND Manager Comment to the requests table
         if (reqData) {
           const { error: reqError } = await supabase.from('requests')
             .update({ 
@@ -233,13 +222,12 @@ export default function ManagerBookings() {
               manager_id: managerBranchId, 
               manager_comment: rejectReason 
             })
-            .eq('request_id', reqData.request_id); // <-- FIXED COLUMN NAME
+            .eq('request_id', reqData.request_id);
             
           if (reqError) throw reqError;
         }
       }
 
-      // 2. Update the Bookings Table
       const updatePayload: any = { booking_status: finalStatus };
       if (newDate && newSession) {
         updatePayload.booking_date = newDate;
@@ -252,12 +240,16 @@ export default function ManagerBookings() {
       const { error: bookingUpdateError } = await supabase.from('bookings').update(updatePayload).eq('id', bookingId);
       if (bookingUpdateError) throw bookingUpdateError;
 
-      // 3. Send Notification to Patient
+      // --- ROBUST NOTIFICATION SYSTEM ---
       if (patientUserId) {
         let msg = '';
         if (actionCategory === 'Approve') {
           if (currentStatus === 'Pending Cancellation') {
-            msg = 'Your cancellation request has been approved. The session has been removed from your active schedule.';
+            msg = 'Your cancellation request has been approved. The session has been successfully removed from your active schedule.';
+          } else if (currentStatus?.includes('Reschedule')) {
+            const bDate = newDate ? new Date(newDate) : new Date(selectedBooking.booking_date);
+            const shiftTime = newSession || selectedBooking.booking_session_time;
+            msg = `Your reschedule request has been approved. Your session is now confirmed for ${bDate.toLocaleDateString('en-GB')} at ${shiftTime}.`;
           } else {
             const bDate = newDate ? new Date(newDate) : new Date(selectedBooking.booking_date);
             const shiftTime = newSession || selectedBooking.booking_session_time;
@@ -266,17 +258,25 @@ export default function ManagerBookings() {
           }
         } else {
           if (currentStatus === 'Pending Cancellation') {
-            msg = `Your cancellation request was declined. Reason: ${rejectReason}. Your session remains active.`;
+            msg = `Your cancellation request was declined. Reason: ${rejectReason}. Your session remains active in your schedule.`;
           } else if (currentStatus?.includes('Reschedule')) {
             msg = `Your reschedule request was declined. Reason: ${rejectReason}. Your original appointment date remains active.`;
           } else {
-            msg = `Your request was declined. Reason: ${rejectReason}. Please contact us.`;
+            msg = `Your booking request was declined. Reason: ${rejectReason}. Please contact the branch directly for further assistance.`;
           }
         }
-        await supabase.from('notifications').insert({ user_id: patientUserId, title: `Request ${actionCategory === 'Approve' ? 'Approved' : 'Declined'}`, message: msg });
+        
+        // Push Notification to the Database explicitly setting 'System' type
+        await supabase.from('notifications').insert([{ 
+          user_id: patientUserId, 
+          title: `Request ${actionCategory === 'Approve' ? 'Approved' : 'Declined'}`, 
+          message: msg,
+          type: 'System',
+          is_read: false
+        }]);
       }
+      // ----------------------------------
 
-      // 4. Update UI State
       setBookings(prev => prev.map(b => {
         if (b.id === bookingId) {
           return {
@@ -314,8 +314,8 @@ export default function ManagerBookings() {
   // --- FILTERING & SORTING EXECUTION ---
   const pendingRequests = bookings.filter(b => ['Pending Approval', 'Pending Reschedule', 'Pending Cancellation'].includes(b.booking_status));
   const confirmedBookings = bookings.filter(b => {
-    if (!['Confirmed', 'Rescheduled', 'Rejected', 'Reschedule Rejected', 'Cancellation Rejected', 'Completed'].includes(b.booking_status)) return false;
-    if (b.booking_type === 'Home' && ['Confirmed', 'Completed'].includes(b.booking_status)) return false; 
+    if (!['Confirmed', 'Rescheduled', 'Rejected', 'Reschedule Rejected', 'Cancellation Rejected', 'Completed', 'In Progress'].includes(b.booking_status)) return false;
+    if (b.booking_type === 'Home' && ['Confirmed', 'Completed', 'In Progress'].includes(b.booking_status)) return false; 
     return true;
   });
   const cancelledBookings = bookings.filter(b => ['Cancelled', 'Expired'].includes(b.booking_status));
@@ -343,7 +343,6 @@ export default function ManagerBookings() {
     });
   }
 
-  // Apply Time/Shift Filter
   if (timeFilter !== 'All') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -361,7 +360,6 @@ export default function ManagerBookings() {
     });
   }
 
-  // Apply Sorting
   displayList.sort((a, b) => {
     const dateA = new Date(a.booking_date).getTime();
     const dateB = new Date(b.booking_date).getTime();
@@ -379,10 +377,7 @@ export default function ManagerBookings() {
           </div>
         </div>
 
-        {/* --- NEW RESPONSIVE CONTROL BAR --- */}
         <div className='flex flex-col gap-3 mb-6 shrink-0'>
-          
-          {/* Row 1: Tabs & Request Type Filter */}
           <div className='bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center'>
             <div className='flex gap-1 bg-slate-100 p-1 rounded-xl'>
               {(['Pending', 'Confirmed', 'Cancelled/Expired'] as const).map(tab => (
@@ -405,7 +400,6 @@ export default function ManagerBookings() {
             </div>
           </div>
 
-          {/* Row 2: Search, Time Filter, & Sort */}
           <div className='flex gap-3 h-12'>
             <div className='relative flex-1 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden'>
               <FiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg' />
@@ -429,7 +423,6 @@ export default function ManagerBookings() {
             </button>
           </div>
         </div>
-        {/* --- END CONTROL BAR --- */}
 
         <div className='flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4'>
           {displayList.length === 0 ? (
@@ -448,6 +441,7 @@ export default function ManagerBookings() {
 
               let statusColor = 'text-amber-600';
               if (['Confirmed', 'Rescheduled', 'Completed'].includes(booking.booking_status)) statusColor = 'text-emerald-600';
+              if (booking.booking_status === 'In Progress') statusColor = 'text-blue-600';
               if (booking.booking_status?.includes('Reject') || booking.booking_status === 'Cancelled' || booking.booking_status === 'Expired') statusColor = 'text-red-600';
 
               return (
@@ -467,7 +461,9 @@ export default function ManagerBookings() {
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${isCancel ? 'bg-red-100 text-red-700' : isTravel ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'} mb-1`}>
                         {isCancel ? <><FiXCircle /> Cancel Req</> : isTravel ? <><FiMapPin /> Travel Req</> : <><FiRefreshCw /> Reschedule Req</>}
                       </span>
-                      <span className={`text-xs font-black uppercase tracking-wider ${statusColor}`}>{booking.booking_status}</span>
+                      <span className={`text-xs font-black uppercase tracking-wider flex items-center gap-1 ${statusColor}`}>
+                        {booking.booking_status === 'In Progress' && <FiActivity className="animate-pulse" />} {booking.booking_status}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -569,8 +565,7 @@ export default function ManagerBookings() {
                 </div>
               )}
 
-              {/* MACHINE SETTINGS (Only visible for Confirmed Travel Requests) */}
-              {selectedBooking.booking_type === 'Travel' && ['Confirmed', 'Completed'].includes(selectedBooking.booking_status) && (
+              {selectedBooking.booking_type === 'Travel' && ['Confirmed', 'Completed', 'In Progress'].includes(selectedBooking.booking_status) && (
                 <div className='bg-amber-50 p-4 rounded-2xl border border-amber-200 shadow-sm'>
                   <h3 className='text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-1.5'>
                     <FiAlertTriangle/> Machine Settings
@@ -602,11 +597,7 @@ export default function ManagerBookings() {
                 )}
                 <div className='flex gap-3'>
                   <button onClick={() => setShowRejectModal(true)} disabled={isProcessing} className='flex-1 py-3.5 bg-white border-2 border-red-100 text-red-600 font-black rounded-xl hover:bg-red-50 transition-colors disabled:opacity-50'>Reject</button>
-                  <button 
-  onClick={() => handleAction('Approve')} 
-  disabled={isProcessing || !approvalValidation.isValid} 
-  className='flex-1 py-3.5 bg-blue-600 text-white ...'
->
+                  <button onClick={() => handleAction('Approve')} disabled={isProcessing || !approvalValidation.isValid} className='flex-1 py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-500 transition-colors disabled:bg-slate-700 disabled:text-slate-400'>
                     {isProcessing ? 'Processing...' : 'Approve'}
                   </button>
                 </div>

@@ -6,7 +6,7 @@ import PatientBottomNav from '../../components/PatientBottomNav';
 
 import { 
   FiMapPin, FiCalendar, FiClock, FiChevronLeft, FiChevronRight,
-  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiRefreshCw, FiFileText
+  FiAlertCircle, FiCheckCircle, FiMoreVertical, FiX, FiRefreshCw, FiFileText, FiActivity
 } from 'react-icons/fi';
 
 const getLocalISODate = (d: Date) => {
@@ -22,6 +22,9 @@ export default function PatientHome() {
   const [patientData, setPatientData] = useState<any>(null);
   const [dbBookings, setDbBookings] = useState<any[]>([]);
   
+  // --- NEW: Track Patient Requests for the Reschedule Timeline ---
+  const [patientRequests, setPatientRequests] = useState<any[]>([]);
+  
   // --- Dynamic Rule State ---
   const [cancelCutoffHours, setCancelCutoffHours] = useState(24);
 
@@ -33,7 +36,7 @@ export default function PatientHome() {
   const [rescheduleTarget, setRescheduleTarget] = useState<any>(null);
   
   const [cancelReason, setCancelReason] = useState('');
-  const [rescheduleReason, setRescheduleReason] = useState(''); // NEW: Reschedule Reason State
+  const [rescheduleReason, setRescheduleReason] = useState(''); 
   const [newDate, setNewDate] = useState('');
   const [newShift, setNewShift] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -63,7 +66,17 @@ export default function PatientHome() {
 
       setDbBookings(bookingData || []);
 
-      // Fetch Dynamic Rules
+      // --- NEW: Fetch Requests associated with these bookings ---
+      if (bookingData && bookingData.length > 0) {
+        const bookingIds = bookingData.map(b => b.id);
+        const { data: requestsData } = await supabase
+          .from('requests')
+          .select('*')
+          .in('booking_id', bookingIds)
+          .order('created_at', { ascending: false });
+        setPatientRequests(requestsData || []);
+      }
+
       const { data: rulesData } = await supabase.from('rules').select('*');
       if (rulesData) {
         const cutoffRule = rulesData.find(r => r.rule_name === 'Cancellation Cut-off Hours');
@@ -86,9 +99,18 @@ export default function PatientHome() {
   const activeBookings = useMemo(() => {
     if (!patientData) return [];
     
-    const physicalBookings = dbBookings.filter(b => b.booking_type === activeTab);
-    
-    if (activeTab === 'Travel') return physicalBookings.filter(b => !['Moved'].includes(b.booking_status));
+    // --- UPGRADED: Auto-expire Past Physical Bookings ---
+    const physicalBookings = dbBookings.map(b => {
+      const bDate = new Date(b.booking_date);
+      bDate.setHours(0,0,0,0);
+      // If the date is in the past and the nurse never started it, it expires.
+      if (bDate < today && ['Scheduled', 'Confirmed', 'Pending Approval'].includes(b.booking_status)) {
+        return { ...b, booking_status: 'Expired' };
+      }
+      return b;
+    }).filter(b => b.booking_type === activeTab && !['Moved'].includes(b.booking_status));
+
+    if (activeTab === 'Travel') return physicalBookings;
 
     const virtualBookings: any[] = [];
     const overriddenDates = new Set(physicalBookings.map(b => b.booking_date));
@@ -100,7 +122,8 @@ export default function PatientHome() {
       const dateStr = getLocalISODate(dateObj);
       const dow = dateObj.getDay();
 
-      if (!overriddenDates.has(dateStr)) {
+      // --- UPGRADED: Only generate routine virtual bookings for Today and the Future ---
+      if (!overriddenDates.has(dateStr) && dateObj >= today) {
         const isMWF = patientData.schedule_pattern === 'MWF' && [1, 3, 5].includes(dow);
         const isTTS = patientData.schedule_pattern === 'TTS' && [2, 4, 6].includes(dow);
         
@@ -119,8 +142,7 @@ export default function PatientHome() {
       }
     }
 
-    const activePhysical = physicalBookings.filter(b => !['Moved'].includes(b.booking_status));
-    return [...activePhysical, ...virtualBookings];
+    return [...physicalBookings, ...virtualBookings];
   }, [dbBookings, patientData, activeTab, currentMonth]);
 
   const monthBookings = activeBookings.filter(b => {
@@ -158,6 +180,7 @@ export default function PatientHome() {
     if (status === 'Cancelled' || status === 'Expired' || status === 'Moved') return { bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-200' };
     if (status?.includes('Rejected')) return { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' };
     if (status?.includes('Reschedule')) return { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' };
+    if (status === 'In Progress') return { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' }; 
     if (status === 'Completed') return { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' };
     if (status === 'Confirmed') return { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' };
     return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' }; 
@@ -193,18 +216,16 @@ export default function PatientHome() {
     } catch (error) { alert("Failed to cancel booking."); } finally { setIsProcessing(false); }
   };
 
-  // --- UPGRADED: CAPACITY CHECK ON RESCHEDULE ---
   const handleConfirmReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rescheduleTarget || !newDate || !newShift || !rescheduleReason.trim()) return;
     setIsProcessing(true);
     try {
-      // 1. Validate real-time capacity before allowing request
       const targetBranchId = rescheduleTarget.branch_id || patientData.home_branch_id;
       const { data: branchInfo } = await supabase.from('branches').select('total_machines, available_slots').eq('id', targetBranchId).single();
       const maxCapacity = (branchInfo?.available_slots && branchInfo.available_slots > 0) 
-  ? branchInfo.available_slots 
-  : (branchInfo?.total_machines || 8);
+        ? branchInfo.available_slots 
+        : (branchInfo?.total_machines || 8);
       const shiftKeyword = newShift.includes('Morning') ? 'Morning' : newShift.includes('Afternoon') ? 'Afternoon' : 'Evening';
       const { data: existingBookings } = await supabase
         .from('bookings')
@@ -220,7 +241,6 @@ export default function PatientHome() {
         return;
       }
 
-      // 2. Submit Request
       let bookingIdToUse = rescheduleTarget.id;
 
       if (typeof rescheduleTarget.id === 'string' && rescheduleTarget.id.startsWith('virtual-')) {
@@ -239,7 +259,6 @@ export default function PatientHome() {
         await supabase.from('bookings').update({ booking_status: 'Pending Reschedule' }).eq('id', bookingIdToUse);
       }
 
-      // Save request_reason to the requests table
       await supabase.from('requests').insert([{ 
         request_type: 'Reschedule', 
         request_new_date: newDate, 
@@ -254,7 +273,6 @@ export default function PatientHome() {
     } catch (error) { alert("Failed to submit reschedule request."); } finally { setIsProcessing(false); }
   };
 
-  // --- DYNAMIC CUT-OFF CALCULATION ---
   let isLateCancel = false;
   if (cancelDialogTarget) {
     const targetDate = new Date(cancelDialogTarget.booking_date);
@@ -304,31 +322,38 @@ export default function PatientHome() {
     const isPast = bDate < today;
     const isPending = booking.booking_status?.includes('Pending');
     const isRejected = booking.booking_status?.includes('Rejected');
-    const isCancelled = booking.booking_status === 'Cancelled';
+    const isCancelled = booking.booking_status === 'Cancelled' || booking.booking_status === 'Expired';
+    const isInProgress = booking.booking_status === 'In Progress';
+    const isCompleted = booking.booking_status === 'Completed';
     
     const style = getStatusStyle(booking.booking_status);
     const displayDay = bDate.toLocaleDateString('en-GB', { weekday: 'short' });
 
     let isNextSession = false;
-    if (!isPast && !isRejected && !isCancelled && !nextSessionFound) {
+    if (!isPast && !isRejected && !isCancelled && !isCompleted && !nextSessionFound) {
       isNextSession = true;
       nextSessionFound = true; 
     }
 
     return (
-      <div className={`bg-white rounded-2xl p-5 border shadow-sm relative overflow-hidden transition-all ${isNextSession ? 'border-blue-400 shadow-md ring-2 ring-blue-50' : 'border-slate-200'}`}>
-        {isNextSession && (
+      <div className={`bg-white rounded-2xl p-5 border shadow-sm relative overflow-hidden transition-all ${isNextSession || isInProgress ? 'border-blue-400 shadow-md ring-2 ring-blue-50' : 'border-slate-200'}`}>
+        {isNextSession && !isInProgress && (
           <div className='bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 absolute top-0 left-0 w-full text-center shadow-sm'>
             Next Session
           </div>
         )}
-        <div className={`flex justify-between items-start mb-3 ${isNextSession ? 'mt-4' : ''}`}>
+        {isInProgress && (
+          <div className='bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 absolute top-0 left-0 w-full text-center shadow-sm animate-pulse flex items-center justify-center gap-1'>
+            <FiActivity /> Ongoing Treatment
+          </div>
+        )}
+        <div className={`flex justify-between items-start mb-3 ${isNextSession || isInProgress ? 'mt-4' : ''}`}>
           <div className='flex items-center gap-2'>
             <div className='text-center'>
               <span className='block text-xs font-black text-slate-400 uppercase'>{displayDay}</span>
               <span className='block text-2xl font-black text-slate-800'>{bDate.getDate()}</span>
             </div>
-            {!isNextSession && (
+            {!isNextSession && !isInProgress && (
               <span className='text-xs font-bold text-slate-500 ml-2'>{bDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric'})}</span>
             )}
           </div>
@@ -338,7 +363,7 @@ export default function PatientHome() {
         </div>
 
         <div className='mb-4'>
-          <p className={`text-base font-black flex items-center gap-1.5 mb-1 ${isNextSession ? 'text-blue-700' : 'text-slate-600'}`}>
+          <p className={`text-base font-black flex items-center gap-1.5 mb-1 ${isNextSession || isInProgress ? 'text-blue-700' : 'text-slate-600'}`}>
             <FiClock className="shrink-0" /> {booking.booking_session_time}
           </p>
           <p className='text-sm font-bold flex items-center gap-1.5 text-slate-500'>
@@ -347,13 +372,13 @@ export default function PatientHome() {
         </div>
 
         <div className='flex gap-2 border-t border-slate-100 pt-3'>
-          {!isPast && !isPending && !isRejected && !isCancelled && (
+          {!isPast && !isPending && !isRejected && !isCancelled && !isInProgress && !isCompleted && !booking.booking_status?.includes('Reschedule') && (
             <>
               <button onClick={() => setRescheduleTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-blue-200 text-blue-600 hover:bg-blue-50'>Reschedule</button>
               <button onClick={() => setCancelDialogTarget(booking)} className='flex-1 py-3 rounded-xl text-xs font-bold border border-slate-200 text-slate-500 hover:text-red-600 hover:bg-red-50'>Cancel</button>
             </>
           )}
-          <button onClick={() => setDetailViewTarget(booking)} className={`flex-1 py-3 rounded-xl text-xs font-bold shadow-md ${isPast || isCancelled ? 'bg-slate-100 text-slate-600 shadow-none' : 'bg-slate-800 text-white hover:bg-slate-900'}`}>
+          <button onClick={() => setDetailViewTarget(booking)} className={`flex-1 py-3 rounded-xl text-xs font-bold shadow-md ${isPast || isCancelled || isCompleted ? 'bg-slate-100 text-slate-600 shadow-none' : 'bg-slate-800 text-white hover:bg-slate-900'}`}>
             View Status
           </button>
         </div>
@@ -471,7 +496,6 @@ export default function PatientHome() {
               <p className='text-sm text-slate-500 mb-4'>{detailViewTarget.branches?.branch_address}</p>
               <p className='text-sm font-black text-slate-700 flex items-center gap-2 mb-3'><FiClock className="text-blue-500"/> {detailViewTarget.booking_session_time}</p>
               
-              {/* UPGRADED: Google Maps Direct Link */}
               <div className='pt-3 border-t border-slate-100'>
                 <button 
                   onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(detailViewTarget.branches?.branch_name + ' ' + detailViewTarget.branches?.branch_address)}`, '_blank')} 
@@ -482,8 +506,35 @@ export default function PatientHome() {
               </div>
             </div>
 
-            {/* UPGRADED: Day of Visit Guide */}
-            {!detailViewTarget.booking_status.includes('Cancelled') && !detailViewTarget.booking_status.includes('Rejected') && (
+            {/* --- UPGRADED: EXPLICIT RESCHEDULE TRACKING PANELS --- */}
+            {(() => {
+              const relatedRequest = patientRequests.find(r => r.booking_id === detailViewTarget.id && r.request_type === 'Reschedule');
+              
+              if (detailViewTarget.booking_status === 'Pending Reschedule' && relatedRequest) {
+                return (
+                  <div className='bg-purple-50 border border-purple-200 p-4 rounded-xl'>
+                    <p className='text-xs font-black text-purple-800 uppercase tracking-widest mb-1'>Under Review</p>
+                    <p className='text-sm text-purple-900 font-medium leading-snug'>
+                      You requested to reschedule this session from <strong>{new Date(detailViewTarget.booking_date).toLocaleDateString('en-GB')}</strong> to <strong>{new Date(relatedRequest.request_new_date).toLocaleDateString('en-GB')}</strong> ({relatedRequest.request_new_session}). This request is currently pending manager approval.
+                    </p>
+                  </div>
+                );
+              }
+              
+              if (detailViewTarget.booking_status === 'Rescheduled') {
+                return (
+                  <div className='bg-emerald-50 border border-emerald-200 p-4 rounded-xl'>
+                    <p className='text-xs font-black text-emerald-800 uppercase tracking-widest mb-1'>Reschedule Approved</p>
+                    <p className='text-sm text-emerald-900 font-medium leading-snug'>
+                      This session was successfully rescheduled to <strong>{new Date(detailViewTarget.booking_date).toLocaleDateString('en-GB')}</strong> after being approved by the branch manager.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {!detailViewTarget.booking_status.includes('Cancelled') && detailViewTarget.booking_status !== 'Expired' && !detailViewTarget.booking_status.includes('Rejected') && detailViewTarget.booking_status !== 'Completed' && (
               <div className='bg-blue-50 border border-blue-100 p-5 rounded-2xl'>
                 <h4 className='text-xs font-black text-blue-800 uppercase tracking-widest mb-3 flex items-center gap-1.5'><FiFileText className='text-lg' /> Day of Visit Guide</h4>
                 <ul className='text-xs text-blue-700 font-bold space-y-2 pl-5 list-disc'>
@@ -542,6 +593,36 @@ export default function PatientHome() {
                         <p className='text-xs font-bold text-red-500 mt-0.5'>Session successfully cancelled</p>
                       </div>
                     </div>
+                  ) : detailViewTarget.booking_status === 'Expired' ? (
+                     <div className='relative flex gap-4 items-start'>
+                      <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 bg-slate-500 text-white'>
+                        <FiX className='text-xs' />
+                      </div>
+                      <div className='pb-1'>
+                        <h4 className='text-sm font-black text-slate-700'>Expired / Missed</h4>
+                        <p className='text-xs font-bold text-slate-500 mt-0.5'>Session date has passed</p>
+                      </div>
+                    </div>
+                  ) : detailViewTarget.booking_status === 'Completed' ? (
+                    <div className='relative flex gap-4 items-start'>
+                      <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 bg-blue-500 text-white'>
+                        <FiCheckCircle className='text-xs' />
+                      </div>
+                      <div className='pb-1'>
+                        <h4 className='text-sm font-black text-blue-700'>Treatment Completed</h4>
+                        <p className='text-xs font-bold text-blue-500 mt-0.5'>Session finished & discharged</p>
+                      </div>
+                    </div>
+                  ) : detailViewTarget.booking_status === 'In Progress' ? (
+                    <div className='relative flex gap-4 items-start'>
+                      <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 bg-emerald-500 text-white animate-pulse'>
+                        <FiActivity className='text-xs' />
+                      </div>
+                      <div className='pb-1'>
+                        <h4 className='text-sm font-black text-emerald-700'>In Progress</h4>
+                        <p className='text-xs font-bold text-emerald-500 mt-0.5'>Treatment is ongoing</p>
+                      </div>
+                    </div>
                   ) : (
                     <div className='relative flex gap-4 items-start'>
                       <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 relative z-10 bg-emerald-500 text-white'>
@@ -557,7 +638,7 @@ export default function PatientHome() {
               </div>
             </div>
 
-            {new Date(detailViewTarget.booking_date) >= today && !detailViewTarget.booking_status.includes('Pending') && !detailViewTarget.booking_status.includes('Rejected') && detailViewTarget.booking_status !== 'Cancelled' && (
+            {new Date(detailViewTarget.booking_date) >= today && !detailViewTarget.booking_status.includes('Pending') && !detailViewTarget.booking_status.includes('Rejected') && detailViewTarget.booking_status !== 'Cancelled' && !['In Progress', 'Completed', 'Rescheduled'].includes(detailViewTarget.booking_status) && (
               <div className='flex gap-3 pt-2'>
                 <button onClick={() => setRescheduleTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 bg-white hover:bg-slate-50'>Reschedule</button>
                 <button onClick={() => setCancelDialogTarget(detailViewTarget)} className='flex-1 py-3.5 rounded-xl font-bold text-sm border-2 border-red-100 text-red-600 bg-red-50 hover:bg-red-100'>Cancel</button>
@@ -624,7 +705,6 @@ export default function PatientHome() {
                 </div>
               </div>
 
-              {/* UPGRADED: Reason for Rescheduling */}
               <div>
                 <label className='block text-xs font-black text-slate-500 uppercase tracking-widest mb-2'>Reason for Rescheduling <span className="text-red-500">*</span></label>
                 <textarea required value={rescheduleReason} onChange={e => setRescheduleReason(e.target.value)} placeholder="Please explain why you need to move this session..." className='w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-400 resize-none h-20' />
