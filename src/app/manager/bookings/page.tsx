@@ -39,7 +39,7 @@ export default function ManagerBookings() {
       selectedBooking.booking_type, 
       selectedBooking.patients?.serology_report_url, 
       selectedBooking.patients?.referral_letter_url, 
-      selectedBooking.booking_status.includes('Cancel'), 
+      (selectedBooking.booking_status || '').includes('Cancel'), // <-- Add the || '' fallback here
       selectedMachineId
     ) 
   : { isValid: false };
@@ -54,10 +54,12 @@ export default function ManagerBookings() {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) return;
 
-      const { data: userData, error: userError } = await supabase.from('users').select('branch_id').eq('user_email', sessionData.session.user.email).single();
+      // 1. Fetch Manager Data
+      const { data: userData, error: userError } = await supabase.from('users').select('user_id, branch_id').eq('user_email', sessionData.session.user.email).single();
       if (userError) throw userError;
       setManagerBranchId(userData.branch_id);
 
+      // 2. Fetch Bookings
       const { data: bookingData, error: bookingError } = await supabase.from('bookings').select('*, branches(branch_name)').eq('branch_id', userData.branch_id);
       if (bookingError) throw bookingError;
       
@@ -69,6 +71,7 @@ export default function ManagerBookings() {
       
       let finalBookings = rawBookings;
 
+      // 3. Attach Patient Data & Expire old routines
       if (patientIds.length > 0) {
         const { data: patientsData } = await supabase.from('patients').select('*, users(*), branches(branch_name)').in('patient_id', patientIds);
         
@@ -100,6 +103,72 @@ export default function ManagerBookings() {
       }
       
       setBookings(finalBookings);
+
+      // ====================================================================
+      // 4. SMART NOTIFICATION GENERATOR FOR BRANCH MANAGER
+      // ====================================================================
+      try {
+        // Fetch existing notifications to prevent sending duplicates
+        const { data: existingNotifs } = await supabase
+          .from('notifications')
+          .select('message')
+          .eq('user_id', userData.user_id);
+        
+        const existingMessages = new Set(existingNotifs?.map(n => n.message) || []);
+        const newNotifs: any[] = [];
+
+        finalBookings.forEach(booking => {
+          if (booking.booking_status?.includes('Pending')) {
+            const bDate = new Date(booking.booking_date);
+            bDate.setHours(0, 0, 0, 0);
+            
+            // Calculate exact days difference
+            const diffDays = Math.round((bDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+            
+            // Get patient name and request type
+            const pName = booking.patients?.users?.user_fullname || 'Unknown Patient';
+            let reqType = booking.booking_type; // 'Home' or 'Travel'
+            if (booking.booking_status.includes('Cancel')) reqType = 'Cancellation';
+            if (booking.booking_status.includes('Reschedule')) reqType = 'Reschedule';
+
+            const dateStr = bDate.toLocaleDateString('en-GB');
+
+            // --- SCENARIO 1: New Booking Request ---
+            const msgNew = `Patient ${pName} submitted a new ${reqType} request to your branch for ${dateStr}.`;
+            if (!existingMessages.has(msgNew)) {
+              newNotifs.push({ user_id: userData.user_id, title: 'New Booking Request', message: msgNew, type: 'System', is_read: false });
+              existingMessages.add(msgNew);
+            }
+
+            // --- SCENARIO 2: Action Required (Exactly 7 Days Away) ---
+            if (diffDays === 7) {
+              const msg7 = `You have a ${reqType} request for ${pName} exactly 7 days away that requires your review.`;
+              if (!existingMessages.has(msg7)) {
+                newNotifs.push({ user_id: userData.user_id, title: 'Action Required: Upcoming Pending Request', message: msg7, type: 'System', is_read: false });
+                existingMessages.add(msg7);
+              }
+            }
+
+            // --- SCENARIO 3: URGENT (Exactly 3 Days Away) ---
+            if (diffDays === 3) {
+              const msg3 = `A ${reqType} request for ${pName} is only 3 days away and remains unapproved. Please process it immediately.`;
+              if (!existingMessages.has(msg3)) {
+                newNotifs.push({ user_id: userData.user_id, title: 'URGENT: Request Expiring Soon', message: msg3, type: 'System', is_read: false });
+                existingMessages.add(msg3);
+              }
+            }
+          }
+        });
+
+        // Insert any new notifications generated in this session
+        if (newNotifs.length > 0) {
+          await supabase.from('notifications').insert(newNotifs);
+        }
+      } catch (notifErr) {
+        console.error("Failed to generate smart notifications:", notifErr);
+      }
+      // ====================================================================
+
     } catch (err: any) {
       alert(`Error loading data: ${err.message}`); 
     } finally {
@@ -117,24 +186,34 @@ export default function ManagerBookings() {
       }
 
       let reqData = null;
-      if (selectedBooking.booking_status?.includes('Cancel') || selectedBooking.booking_status?.includes('Reschedule')) {
-        const { data, error } = await supabase
-          .from('requests')
-          .select('*')
-          .eq('booking_id', selectedBooking.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(); 
-          
-        if (error) console.error("Error fetching request details:", error);
-        
-        reqData = data;
-        setRequestDetails(data);
-      } else {
-        setRequestDetails(null);
-      }
+      const currentStatus = selectedBooking.booking_status || '';
+      const isSpecialRequest = currentStatus.includes('Cancel') || currentStatus.includes('Reschedule');
 
-      if (managerBranchId && !selectedBooking.booking_status?.includes('Cancel')) {
+      // 1. Fetch the Request Reason if applicable
+      if (isSpecialRequest) {
+        try {
+          const { data, error } = await supabase
+            .from('requests')
+            .select('*')
+            .eq('booking_id', selectedBooking.id)
+            .order('request_id', { ascending: false })
+            .limit(1)
+            .maybeSingle(); 
+            
+          if (error && error.code !== 'PGRST116') {
+            console.error("DB Error fetching request:", error.message || error);
+          }
+          if (data) {
+            reqData = data;
+          }
+        } catch (err) {
+          console.error("Network Exception:", err);
+        }
+      }
+      setRequestDetails(reqData);
+
+      // 2. Load available machines if needed
+      if (managerBranchId && !currentStatus.includes('Cancel')) {
         const targetDate = reqData?.request_new_date || selectedBooking.booking_date;
         const targetSession = reqData?.request_new_session || selectedBooking.booking_session_time;
         
@@ -160,6 +239,7 @@ export default function ManagerBookings() {
       }
       setSelectedMachineId(selectedBooking.machine_id?.toString() || ''); 
     }
+    
     loadDetails();
   }, [selectedBooking, managerBranchId]);
 
@@ -366,6 +446,21 @@ export default function ManagerBookings() {
     return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
   });
 
+  const handleViewDocument = async (filePath: string) => {
+    let path = filePath;
+    // Fallback for older URLs
+    if (path.includes('http')) {
+      path = path.split('/patient_documents/')[1];
+    }
+
+    const { data, error } = await supabase.storage.from('patient_documents').createSignedUrl(path, 60);
+    if (data) {
+      setDocViewerUrl(data.signedUrl);
+    } else {
+      alert("Failed to load secure document.");
+    }
+  };
+
   return (
     <main className='p-8 bg-slate-50 min-h-screen font-sans pb-24 flex gap-6 relative'>
       <div className='flex-1 max-w-3xl flex flex-col h-[calc(100vh-100px)]'>
@@ -509,13 +604,13 @@ export default function ManagerBookings() {
                 </div>
               </div>
 
-              {requestDetails?.request_reason && (
-                <div className='bg-slate-100 p-4 rounded-2xl border border-slate-200 shadow-inner'>
-                  <h3 className='text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1.5'>
+              {(selectedBooking.booking_status?.includes('Cancel') || selectedBooking.booking_status?.includes('Reschedule')) && (
+                <div className='bg-amber-50/50 p-4 rounded-2xl border border-amber-200 shadow-sm mt-2'>
+                  <h3 className='text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-1.5'>
                     <FiMessageSquare /> Patient's Provided Reason
                   </h3>
-                  <p className='text-sm font-bold text-slate-700 italic border-l-2 border-slate-400 pl-3 py-1'>
-                    "{requestDetails.request_reason}"
+                  <p className='text-sm font-bold text-slate-700 italic border-l-4 border-amber-400 pl-3 py-1 bg-white rounded-r-lg'>
+                    {requestDetails?.request_reason ? `"${requestDetails.request_reason}"` : "No reason was provided by the patient."}
                   </p>
                 </div>
               )}
@@ -555,11 +650,11 @@ export default function ManagerBookings() {
                   <div className='space-y-3'>
                     <div className='flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl'>
                       <div><p className='text-sm font-bold text-slate-800'>Serology Report</p>{selectedBooking.patients?.serology_report_url ? <p className='text-[10px] font-bold text-emerald-600'>Uploaded</p> : <p className='text-[10px] font-bold text-red-500'>Missing</p>}</div>
-                      <button disabled={!selectedBooking.patients?.serology_report_url} onClick={() => setDocViewerUrl(selectedBooking.patients?.serology_report_url)} className='p-2 bg-white border border-slate-200 rounded-lg text-slate-600 hover:text-blue-600 disabled:opacity-50'><FiEye /></button>
+                      <button disabled={!selectedBooking.patients?.serology_report_url} onClick={() => handleViewDocument(selectedBooking.patients?.serology_report_url)} className='p-2 bg-white border border-slate-200 rounded-lg text-slate-600 hover:text-blue-600 disabled:opacity-50'><FiEye /></button>
                     </div>
                     <div className='flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl'>
                       <div><p className='text-sm font-bold text-slate-800'>Doctor's Referral</p>{selectedBooking.patients?.referral_letter_url ? <p className='text-[10px] font-bold text-emerald-600'>Uploaded</p> : <p className='text-[10px] font-bold text-red-500'>Missing</p>}</div>
-                      <button disabled={!selectedBooking.patients?.referral_letter_url} onClick={() => setDocViewerUrl(selectedBooking.patients?.referral_letter_url)} className='p-2 bg-white border border-slate-200 rounded-lg text-slate-600 hover:text-blue-600 disabled:opacity-50'><FiEye /></button>
+                      <button disabled={!selectedBooking.patients?.referral_letter_url} onClick={() => handleViewDocument(selectedBooking.patients?.referral_letter_url)} className='p-2 bg-white border border-slate-200 rounded-lg text-slate-600 hover:text-blue-600 disabled:opacity-50'><FiEye /></button>
                     </div>
                   </div>
                 </div>

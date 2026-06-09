@@ -194,19 +194,12 @@ export default function ManagerMachineStatus() {
 
     try {
       if (!formData.serial_number.trim()) throw new Error("Serial Number is required.");
-
-      // ==========================================
-      // USE CASE ALT 2(a) & EXCEPTION 1(a).5: 
-      // Validation for calibration/maintenance records
-      // ==========================================
       if (formData.status === 'Active' && !formData.last_calibration_date) {
          throw new Error("Activation blocked. Missing required calibration records.");
       }
 
       const isReactivating = modalMode === 'edit' && editingMachine.status === 'Under Maintenance' && formData.status === 'Active';
       
-      // Enforcing business rule: "Machines must undergo maintenance after X sessions"
-      // (Using operating hours as the metric for usage sessions)
       if ((isReactivating || formData.status === 'Active') && parseInt(formData.operating_hours) >= 4000 && !formData.last_maintenance_date) {
          throw new Error("Activation blocked. Machine has exceeded maximum operating hours without documented maintenance.");
       }
@@ -225,12 +218,8 @@ export default function ManagerMachineStatus() {
         }
       }
 
-      // ==========================================
-      // SAFETY CHECKS WHEN DEACTIVATING A MACHINE
-      // ==========================================
       if (modalMode === 'edit' && formData.status !== 'Active' && editingMachine.status === 'Active') {
         
-        // EXCEPTION 6(a): Safety Violation (Active Treatment Check)
         const { count: activeTreatments, error: treatErr } = await supabase
           .from('treatments')
           .select('*', { count: 'exact', head: true })
@@ -292,6 +281,7 @@ export default function ManagerMachineStatus() {
       }
 
       setMessage({ type: 'success', text: "Machine status updated successfully." });
+      
       fetchData(); 
       setTimeout(() => setIsModalOpen(false), 1500);
 

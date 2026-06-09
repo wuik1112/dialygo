@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
   FiArrowLeft, FiAlertTriangle, FiDroplet, FiShield, 
-  FiPlayCircle, FiCheckSquare, FiUser, FiActivity, FiMapPin, FiCheckCircle
+  FiPlayCircle, FiCheckSquare, FiUser, FiActivity, FiMapPin, FiCheckCircle, FiX // <-- Add FiX here
 } from 'react-icons/fi';
 import { validatePreFlightData } from '@/utils/validationHelpers';
 
@@ -22,6 +22,7 @@ function StartTreatmentContent() {
   const [prescription, setPrescription] = useState<any>(null);
   const [booking, setBooking] = useState<any>(null);
   const [nurseData, setNurseData] = useState<any>(null);
+  const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
 
   const [vitals, setVitals] = useState({ pre_weight: '', bp_sys: '', bp_dia: '', pre_hr: '', pre_temp: '36.5' });
 
@@ -194,11 +195,18 @@ const preFlightValidation = validatePreFlightData(
               <h3 className="text-sm font-black text-blue-800 flex items-center gap-2">
                 <FiShield className="text-blue-500" /> Active Nephrologist Prescription
               </h3>
-              {prescription ? (
-                <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest px-2 py-1 bg-blue-100 rounded-md">Verified</span>
-              ) : (
-                <span className="text-[10px] font-black text-red-600 uppercase tracking-widest px-2 py-1 bg-red-100 rounded-md border border-red-200">Missing</span>
-              )}
+              <div className="flex items-center gap-3">
+                {prescription && (
+                  <button type="button" onClick={() => setShowPrescriptionModal(true)} className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline">
+                    View Full Details
+                  </button>
+                )}
+                {prescription ? (
+                  <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest px-2 py-1 bg-blue-100 rounded-md">Verified</span>
+                ) : (
+                  <span className="text-[10px] font-black text-red-600 uppercase tracking-widest px-2 py-1 bg-red-100 rounded-md border border-red-200">Missing</span>
+                )}
+              </div>
             </div>
             
             <div className="p-6 md:p-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
@@ -361,6 +369,78 @@ const preFlightValidation = validatePreFlightData(
           </form>
         </div>
       </div>
+      {/* OFFICIAL PRESCRIPTION MODAL */}
+      {showPrescriptionModal && prescription && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+            
+            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+              <div>
+                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <FiShield className="text-blue-500" /> Official Dialysis Prescription
+                </h2>
+                <p className="text-xs font-bold text-slate-500 mt-1">
+                  Last Updated: {new Date(prescription.updated_at).toLocaleDateString('en-GB')}
+                </p>
+              </div>
+              <button onClick={() => setShowPrescriptionModal(false)} type="button" className="p-2 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors">
+                <FiX className="text-xl" />
+              </button>
+            </div>
+
+            <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1 bg-white">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-10">
+                
+                {/* A. Dialysis Dose Parameters */}
+                <div className="col-span-2 lg:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-6">
+                  <div className="col-span-2 md:col-span-4"><p className="text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-blue-100 pb-2">A. Dialysis Dose Parameters</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Frequency</label><p className="font-black text-slate-800">{prescription.session_frequency}x / Week</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Duration (mins)</label><p className="font-black text-slate-800">{prescription.target_duration}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Blood Flow (Qb)</label><p className="font-black text-slate-800">{prescription.blood_flow_rate} ml/min</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Target Kt/V</label><p className="font-black text-slate-800">{prescription.target_ktv}</p></div>
+                </div>
+
+                {/* B. Ultrafiltration & Volume Control */}
+                <div className="col-span-2 lg:col-span-4 grid grid-cols-2 gap-6">
+                  <div className="col-span-2"><p className="text-[10px] font-black text-amber-600 uppercase tracking-widest border-b border-amber-100 pb-2">B. Ultrafiltration & Volume Control</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Target Dry Weight (kg)</label><p className="font-black text-amber-600 text-2xl">{prescription.target_dry_weight}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Modality</label><p className="font-black text-slate-800 text-lg">{prescription.treatment_modality}</p></div>
+                </div>
+
+                {/* C. Dialysate Composition */}
+                <div className="col-span-2 lg:col-span-4 grid grid-cols-3 md:grid-cols-5 gap-4">
+                  <div className="col-span-3 md:col-span-5"><p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2">C. Dialysate Composition</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Sodium (Na)</label><p className="font-black text-slate-800">{prescription.dialysate_sodium}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Potassium (K)</label><p className="font-black text-slate-800">{prescription.dialysate_potassium}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Calcium (Ca)</label><p className="font-black text-slate-800">{prescription.dialysate_calcium}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bicarbonate</label><p className="font-black text-slate-800">{prescription.dialysate_bicarbonate}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Temp (°C)</label><p className="font-black text-slate-800">{prescription.dialysate_temp}</p></div>
+                </div>
+
+                {/* D. Anticoagulation */}
+                <div className="col-span-2 lg:col-span-4 grid grid-cols-2 gap-6">
+                  <div className="col-span-2"><p className="text-[10px] font-black text-purple-600 uppercase tracking-widest border-b border-purple-100 pb-2">D. Anticoagulation</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Regimen Type</label><p className="font-black text-slate-800">{prescription.anticoagulation_profile}</p></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Dosage (IU)</label><p className="font-black text-slate-800">{prescription.anticoagulation_profile === 'Heparin-Free' ? '0' : prescription.heparin_dosage}</p></div>
+                </div>
+
+                {/* E. Special Nursing Instructions */}
+                {prescription.nursing_instructions && (
+                  <div className="col-span-2 lg:col-span-4 mt-4">
+                    <p className="text-[10px] font-black text-red-600 uppercase tracking-widest border-b border-red-100 pb-2 flex items-center gap-2 mb-3">
+                      <FiAlertTriangle /> E. Special Nursing Instructions & Cautions
+                    </p>
+                    <div className="p-5 bg-red-50/50 border border-red-100 rounded-xl">
+                      <p className="text-sm font-bold text-slate-700 leading-relaxed">{prescription.nursing_instructions}</p>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

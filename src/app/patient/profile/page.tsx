@@ -152,7 +152,21 @@ export default function PatientProfile() {
     ageStr = `${Math.abs(ageDate.getUTCFullYear() - 1970)} years old`;
   }
 
-  return (
+  const handleViewDocument = async (title: string, filePath: string) => {
+    let path = filePath;
+    if (path.includes('http')) {
+      path = path.split('/patient_documents/')[1];
+    }
+
+    const { data, error } = await supabase.storage.from('patient_documents').createSignedUrl(path, 60);
+    if (data) {
+      setShowDocViewer({ title: title, url: data.signedUrl });
+    } else {
+      alert("Failed to load secure document.");
+    }
+  };
+
+ return (
     <div className='max-w-md mx-auto bg-slate-50 h-[100dvh] relative shadow-2xl font-sans overflow-hidden flex flex-col'>
       
       {/* 1. HEADER OVERLAY */}
@@ -224,7 +238,7 @@ export default function PatientProfile() {
                 <span className='text-xs font-bold text-slate-700'>Serology Report</span>
               </div>
               {hasSerologyDoc ? (
-                <button onClick={() => setShowDocViewer({title: 'Serology Report', url: profileData.serology_report_url})} className='text-blue-600 text-xs font-bold hover:underline'>View</button>
+                <button onClick={() => handleViewDocument('Serology Report', profileData.serology_report_url)} className='text-blue-600 text-xs font-bold hover:underline'>View</button>
               ) : (
                 <span className='text-[10px] font-bold text-red-500'>Missing</span>
               )}
@@ -482,7 +496,7 @@ export default function PatientProfile() {
           </div>
           
           <div className='flex-1 w-full bg-black flex items-center justify-center relative'>
-            {showDocViewer.url.toLowerCase().endsWith('.pdf') ? (
+            {showDocViewer.url.toLowerCase().includes('.pdf') ? (
               <iframe src={showDocViewer.url} className='w-full h-full border-none bg-white' title="Document Viewer" />
             ) : (
               <img src={showDocViewer.url} alt="Document Viewer" className='w-full h-full object-contain' />

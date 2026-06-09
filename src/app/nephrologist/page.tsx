@@ -208,16 +208,14 @@ export default function ClinicalPatientRecord() {
       const { error: uploadError } = await supabase.storage.from('patient_documents').upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage.from('patient_documents').getPublicUrl(filePath);
-
       const updatePayload: any = {};
       if (isSero) {
-        updatePayload.serology_report_url = publicUrl;
+        updatePayload.serology_report_url = filePath; 
         updatePayload.serology_document_status = 'Verified';
         updatePayload.last_serology_date = serologyDate;
         updatePayload.travel_status = 'Active';
       } else {
-        updatePayload.referral_letter_url = publicUrl;
+        updatePayload.referral_letter_url = filePath; 
         updatePayload.referral_document_status = 'Verified';
       }
 
@@ -235,6 +233,21 @@ export default function ClinicalPatientRecord() {
     } finally {
       isSero ? setIsUploadingSerology(false) : setIsUploadingReferral(false);
     }
+  };
+  
+  const handleViewDocument = async (filePath: string) => {
+    let path = filePath;
+    // Fallback just in case your database still has old "http" URLs saved in it
+    if (path.includes('http')) {
+      path = path.split('/patient_documents/')[1];
+    }
+  
+    const { data, error } = await supabase.storage.from('patient_documents').createSignedUrl(path, 60); 
+    if (error || !data) {
+      alert("Error fetching document security token.");
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
   };
 
   const handleSavePrescription = async () => {
@@ -621,10 +634,10 @@ export default function ClinicalPatientRecord() {
 
                         <div className="flex gap-2">
                           {selectedPatient.serology_report_url && (
-                            <a href={selectedPatient.serology_report_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center gap-2 transition-colors flex-1 justify-center">
-                              <FiCheckCircle /> View Active File
-                            </a>
-                          )}
+  <button onClick={(e) => { e.preventDefault(); handleViewDocument(selectedPatient.serology_report_url); }} className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center gap-2 transition-colors flex-1 justify-center">
+    <FiCheckCircle /> View Active File
+  </button>
+)}
                           
                           <input type="file" ref={serologyInputRef} onChange={(e) => handleFileUpload(e, 'serology')} className="hidden" accept="image/*,application/pdf" />
                           <button 
@@ -648,10 +661,10 @@ export default function ClinicalPatientRecord() {
                       <div className="mt-4 flex flex-col gap-3 justify-end h-full">
                         <div className="flex gap-2 mt-auto">
                           {selectedPatient.referral_letter_url && (
-                            <a href={selectedPatient.referral_letter_url} target="_blank" rel="noreferrer" className="text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center gap-2 transition-colors flex-1 justify-center">
-                              <FiCheckCircle /> View Active File
-                            </a>
-                          )}
+  <button onClick={(e) => { e.preventDefault(); handleViewDocument(selectedPatient.referral_letter_url); }} className="text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center gap-2 transition-colors flex-1 justify-center">
+    <FiCheckCircle /> View Active File
+  </button>
+)}
                           
                           <input type="file" ref={referralInputRef} onChange={(e) => handleFileUpload(e, 'referral')} className="hidden" accept="image/*,application/pdf" />
                           <button 
