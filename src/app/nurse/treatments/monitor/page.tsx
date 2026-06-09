@@ -39,6 +39,7 @@ function MonitorContent() {
   
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(isPaused); 
+  const hasNotifiedOvertime = useRef(false);
   const [interventionFeedback, setInterventionFeedback] = useState<string | null>(null);
 
   const isTimeComplete = elapsedMinutes >= targetMinutes;
@@ -99,6 +100,39 @@ function MonitorContent() {
     fetchTreatmentAndLogs();
   }, [patientId, router]);
 
+  // NEW: Overtime Notification Trigger
+  useEffect(() => {
+    async function triggerOvertimeAlert() {
+      // If we are overtime, and haven't notified yet, and we know who the nurse is
+      if (elapsedMinutes > targetMinutes && !hasNotifiedOvertime.current && currentNurseId) {
+        
+        hasNotifiedOvertime.current = true; // Lock it immediately to prevent spam
+
+        try {
+          const patientName = treatment?.patients?.users?.user_fullname || 'A patient';
+          
+          await supabase.from('notifications').insert([{
+            user_id: currentNurseId,
+            title: 'CRITICAL: Session Overtime',
+            message: `URGENT: ${patientName}'s dialysis session has exceeded the prescribed ${targetMinutes} minutes. Please assess the patient and disconnect immediately.`,
+            type: 'Alert', // Uses your 'Alert' type to make it show up red with a warning icon
+            is_read: false
+          }]);
+          
+          // Optional: Auto-log it into the clinical notes
+          const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const logEntry = `[${time}] SYSTEM WARNING: Session exceeded prescribed duration.\n`;
+          setDischargeForm(prev => ({ ...prev, complications: prev.complications ? prev.complications + logEntry : logEntry }));
+
+        } catch (error) {
+          console.error("Failed to send overtime notification:", error);
+        }
+      }
+    }
+
+    triggerOvertimeAlert();
+  }, [elapsedMinutes, targetMinutes, currentNurseId, treatment]);
+  
   useEffect(() => {
     if (!treatment) return;
     const interval = setInterval(() => {
@@ -257,9 +291,11 @@ function MonitorContent() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="bg-white text-slate-700 px-4 py-2 rounded-xl text-xs font-black tracking-widest flex items-center gap-2 border border-slate-200 shadow-sm shrink-0">
-            <FiClock className="text-lg text-blue-500" /> {formatTimeHM(elapsedMinutes)} Elapsed
-          </div>
+          <div className={`px-4 py-2 rounded-xl text-xs font-black tracking-widest flex items-center gap-2 border shadow-sm shrink-0 transition-colors ${elapsedMinutes > targetMinutes ? 'bg-red-100 text-red-700 border-red-200 animate-pulse' : 'bg-white text-slate-700 border-slate-200'}`}>
+  <FiClock className={`text-lg ${elapsedMinutes > targetMinutes ? 'text-red-600' : 'text-blue-500'}`} /> 
+  {formatTimeHM(elapsedMinutes)} Elapsed 
+  {elapsedMinutes > targetMinutes && ` (+${elapsedMinutes - targetMinutes}m Over)`}
+</div>
           {isPaused ? (
             <div className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 animate-pulse border border-red-200 shrink-0">
               <FiPauseCircle className="text-lg" /> Paused
@@ -395,7 +431,13 @@ function MonitorContent() {
             ) : (
             <form onSubmit={handleDischarge} className="space-y-6 animate-in fade-in duration-500">
               {isOverrideActive && <div className="p-3 bg-red-900/30 border border-red-500/50 rounded-xl mb-4"><p className="text-[10px] font-black text-red-400 uppercase tracking-widest flex items-center gap-2"><FiAlertTriangle /> Early Termination Active</p></div>}
-
+              {elapsedMinutes > targetMinutes && (
+    <div className="p-3 bg-red-900/30 border border-red-500/50 rounded-xl mb-4">
+      <p className="text-[10px] font-black text-red-400 uppercase tracking-widest flex items-center gap-2">
+        <FiAlertTriangle className="text-lg shrink-0" /> WARNING: Session has exceeded the prescribed {targetMinutes} minutes by {elapsedMinutes - targetMinutes} minutes. Disconnect immediately.
+      </p>
+    </div>
+  )}
               <div className="space-y-4">
                 <div className="bg-slate-800 p-3 rounded-xl border border-slate-700">
                   <label className="block text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
