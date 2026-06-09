@@ -89,17 +89,25 @@ export default function NotificationInbox({ isMobile = false, returnPath = '/', 
   };
 
   const formatTime = (dateString: string) => {
+    // Append 'Z' (Zulu time) to force JavaScript to read it as UTC.
+    // It will then automatically convert it to Malaysia local time (+08:00) for the user.
+    const safeDateString = dateString.includes('Z') || dateString.includes('+') 
+      ? dateString 
+      : `${dateString}Z`;
+
     return new Intl.DateTimeFormat('en-MY', {
-      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true
-    }).format(new Date(dateString));
+      day: 'numeric', 
+      month: 'short', 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      hour12: true
+    }).format(new Date(safeDateString));
   };
 
-  // --- FILTERING ENGINE ---
   const filteredNotifications = notifications.filter(notif => {
     const matchesSearch = notif.title?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           notif.message?.toLowerCase().includes(searchTerm.toLowerCase());
     
-    // Using the 'type' column from our database ('System', 'Alert', 'Booking')
     if (activeTab === 'Alerts') return matchesSearch && notif.type === 'Alert';
     if (activeTab === 'System') return matchesSearch && notif.type === 'System';
     if (activeTab === 'Booking') return matchesSearch && notif.type === 'Booking';

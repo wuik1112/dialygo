@@ -595,14 +595,18 @@ export default function ManagerBookings() {
               )}
 
               <div className='bg-white p-4 rounded-2xl border border-slate-100 shadow-sm'>
-                <h3 className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3'>Patient Profile</h3>
-                <p className='text-lg font-black text-slate-800'>{selectedBooking.patients?.users?.user_fullname}</p>
-                <div className='text-sm font-medium text-slate-500 mt-3 space-y-2'>
-                  <p className='flex items-center gap-2'><span className='w-5 text-slate-400 font-bold'>IC:</span> <span className='font-bold text-slate-700'>{selectedBooking.patients?.users?.user_ic}</span></p>
-                  <p className='flex items-center gap-2'><span className='w-5'><FiHome className='text-slate-400 text-lg' /></span> <span className='font-bold text-slate-700'>{selectedBooking.patients?.branches?.branch_name || 'Unknown Home Branch'}</span></p>
-                  <p className='flex items-center gap-2'><span className='w-5'><FiDroplet className='text-red-400 text-lg' /></span> <span className='font-bold text-slate-700'>Type {selectedBooking.patients?.patient_blood_type || 'Unknown'}</span></p>
-                </div>
-              </div>
+  <h3 className='text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3'>Patient Profile</h3>
+  <p className='text-lg font-black text-slate-800'>{selectedBooking.patients?.users?.user_fullname}</p>
+  <div className='text-sm font-medium text-slate-500 mt-3 space-y-2'>
+    <p className='flex items-center gap-2'><span className='w-5 text-slate-400 font-bold'>IC:</span> <span className='font-bold text-slate-700'>{selectedBooking.patients?.users?.user_ic}</span></p>
+    <p className='flex items-center gap-2'><span className='w-5'><FiHome className='text-slate-400 text-lg' /></span> <span className='font-bold text-slate-700'>{selectedBooking.patients?.branches?.branch_name || 'Unknown Home Branch'}</span></p>
+    <p className='flex items-center gap-2'><span className='w-5'><FiDroplet className='text-red-400 text-lg' /></span> <span className='font-bold text-slate-700'>Type {selectedBooking.patients?.patient_blood_type || 'Unknown'}</span></p>
+    <p className='flex items-center gap-2'>
+      <span className='w-5'><FiActivity className='text-blue-500 text-lg' /></span> 
+      <span className='font-bold text-slate-700'>Machine: {selectedBooking.patients?.preferred_machine_model || 'Not specified'}</span>
+    </p>
+  </div>
+</div>
 
               {(selectedBooking.booking_status?.includes('Cancel') || selectedBooking.booking_status?.includes('Reschedule')) && (
                 <div className='bg-amber-50/50 p-4 rounded-2xl border border-amber-200 shadow-sm mt-2'>

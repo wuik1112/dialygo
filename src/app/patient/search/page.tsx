@@ -744,11 +744,11 @@ export default function PatientSearchBooking() {
               <h2 className='text-xl font-black text-slate-800'>{selectedBranch.branch_name}</h2>
               <p className='text-sm text-slate-500 mt-2 leading-relaxed'>{selectedBranch.branch_address}</p>
               
-              <div className='flex justify-between items-center mt-2'>
-                <button type="button" onClick={() => window.open(`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(selectedBranch.branch_name + ' ' + selectedBranch.branch_address)}`, '_blank')} className='text-blue-600 text-sm font-bold flex items-center gap-1 hover:text-blue-800 transition-colors'>
+              {/* <div className='flex justify-between items-center mt-2'>
+                <button type="button" onClick={() => window.open(`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(selectedBranch.branch_address)}`, '_blank')} className='text-blue-600 text-sm font-bold flex items-center gap-1 hover:text-blue-800 transition-colors'>
                   <FiMapPin /> View map
                 </button>
-              </div>
+              </div> */}
 
               <div className='mt-6 border-t border-slate-100 pt-4'>
                 <h3 className='text-xs font-bold text-slate-400 uppercase tracking-widest mb-3'>Facilities & Pricing</h3>
@@ -825,24 +825,40 @@ export default function PatientSearchBooking() {
 
               <div className='space-y-3 mb-5 relative'>
                 <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Morning') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
-                  <div>
-                    <p className={`font-bold ${!isEligibleForSelectedDate || morningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Morning Shift</p>
-                    <p className={`text-xs font-bold mt-1 ${morningSlots > 0 && isEligibleForSelectedDate ? 'text-emerald-600' : 'text-red-500'}`}>{morningSlots > 0 ? `${morningSlots} Slots Available` : 'Full (No Slots)'}</p>
-                  </div>
-                  <button type="button" disabled={!isEligibleForSelectedDate || morningSlots === 0} onClick={() => setDraftShift('Morning (08:00 - 12:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Morning') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                    {draftShift.includes('Morning') ? 'Selected' : 'Select'}
-                  </button>
-                </div>
+  <div>
+    <p className={`font-bold ${!isEligibleForSelectedDate || morningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Morning Shift</p>
+    <p className={`text-xs font-bold mt-1 ${!isEligibleForSelectedDate || morningSlots === 0 ? 'text-red-500' : patientRecord?.preferred_shift?.includes('Morning') ? 'text-emerald-600' : 'text-amber-500'}`}>
+      {morningSlots > 0 ? `${morningSlots} Slots Available` : 'Full (No Slots)'}
+    </p>
+  </div>
+  <button type="button" disabled={!isEligibleForSelectedDate || morningSlots === 0} onClick={() => setDraftShift('Morning (08:00 - 12:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || morningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Morning') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+    {draftShift.includes('Morning') ? 'Selected' : 'Select'}
+  </button>
+</div>
                 
                 <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Afternoon') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
-                  <div>
-                    <p className={`font-bold ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Afternoon Shift</p>
-                    <p className={`text-xs font-bold mt-1 ${afternoonSlots > 0 && isEligibleForSelectedDate ? 'text-amber-600' : 'text-red-500'}`}>{afternoonSlots > 0 ? `${afternoonSlots} Slots Available` : 'Full (No Slots)'}</p>
-                  </div>
-                  <button type="button" disabled={!isEligibleForSelectedDate || afternoonSlots === 0} onClick={() => setDraftShift('Afternoon (12:00 - 16:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Afternoon') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                    {draftShift.includes('Afternoon') ? 'Selected' : 'Select'}
-                  </button>
-                </div>
+  <div>
+    <p className={`font-bold ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Afternoon Shift</p>
+    <p className={`text-xs font-bold mt-1 ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'text-red-500' : patientRecord?.preferred_shift?.includes('Afternoon') ? 'text-emerald-600' : 'text-amber-500'}`}>
+      {afternoonSlots > 0 ? `${afternoonSlots} Slots Available` : 'Full (No Slots)'}
+    </p>
+  </div>
+  <button type="button" disabled={!isEligibleForSelectedDate || afternoonSlots === 0} onClick={() => setDraftShift('Afternoon (12:00 - 16:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || afternoonSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Afternoon') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+    {draftShift.includes('Afternoon') ? 'Selected' : 'Select'}
+  </button>
+</div>
+
+                <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-50 border-slate-100 opacity-60' : draftShift.includes('Evening') ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200'}`}>
+  <div>
+    <p className={`font-bold ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'text-slate-400' : 'text-slate-800'}`}>Evening Shift</p>
+    <p className={`text-xs font-bold mt-1 ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'text-red-500' : patientRecord?.preferred_shift?.includes('Evening') ? 'text-emerald-600' : 'text-amber-500'}`}>
+      {eveningSlots > 0 ? `${eveningSlots} Slots Available` : 'Full (No Slots)'}
+    </p>
+  </div>
+  <button type="button" disabled={!isEligibleForSelectedDate || eveningSlots === 0} onClick={() => setDraftShift('Evening (18:00 - 22:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Evening') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+    {draftShift.includes('Evening') ? 'Selected' : 'Select'}
+  </button>
+</div>
               </div>
 
               {!isShiftMatch && draftShift && (

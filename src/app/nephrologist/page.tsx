@@ -25,9 +25,10 @@ export default function ClinicalPatientRecord() {
   const [searchTerm, setSearchTerm] = useState('');
   const [branchFilter, setBranchFilter] = useState('All');
   const [prescriptionFilter, setPrescriptionFilter] = useState('All');
-  
-  // NEW: State for sorting, defaulting to Name Ascending
   const [sortBy, setSortBy] = useState('name_asc');
+  
+  // NEW: State for the document filter
+  const [documentFilter, setDocumentFilter] = useState('All');
 
   const [isClinicalModalOpen, setIsClinicalModalOpen] = useState(false);
   const [isUpdatingClinical, setIsUpdatingClinical] = useState(false);
@@ -74,7 +75,6 @@ export default function ClinicalPatientRecord() {
         prescriptions(*),
         treatments(session_date, session_status, fluid_removed, session_complications)
       `)
-      // We pull everything, sorting will now be handled dynamically on the frontend!
       .order('patient_id', { ascending: false }); 
 
     if (patientError) console.error("Error fetching patients:", patientError);
@@ -170,18 +170,24 @@ export default function ClinicalPatientRecord() {
 
       if (patientError) throw patientError;
 
-      const { error: prescriptionError } = await supabase
-        .from('prescriptions')
-        .update({ 
-          vascular_access_type: clinicalFormData.vascular_access,
-          vascular_access_location: clinicalFormData.vascular_access_location
-        })
-        .eq('patient_id', clinicalFormData.patient_id)
-        .eq('status', 'Active'); 
+      const activeRx = selectedPatient.prescriptions?.find((p: any) => p.status === 'Active');
+      
+      if (!activeRx && (clinicalFormData.vascular_access || clinicalFormData.vascular_access_location)) {
+        alert("Patient profile saved, but Vascular Access could not be saved. You must Authorize & Sign an initial Dialysis Prescription before logging vascular access data.");
+      } else if (activeRx) {
+        const { error: prescriptionError } = await supabase
+          .from('prescriptions')
+          .update({ 
+            vascular_access_type: clinicalFormData.vascular_access,
+            vascular_access_location: clinicalFormData.vascular_access_location
+          })
+          .eq('patient_id', clinicalFormData.patient_id)
+          .eq('status', 'Active'); 
 
-      if (prescriptionError) throw prescriptionError;
+        if (prescriptionError) throw prescriptionError;
+      }
 
-      alert("Clinical Profile updated successfully!");
+      alert("Clinical Profile update process completed!");
       setIsClinicalModalOpen(false);
       await fetchClinicalData();
     } catch (error: any) {
@@ -208,9 +214,11 @@ export default function ClinicalPatientRecord() {
       const fileName = `${type}_${selectedPatient.patient_id}_${Date.now()}.${fileExt}`;
       const filePath = `${selectedPatient.patient_id}/${fileName}`;
 
+      // 1. Upload file to Supabase Storage
       const { error: uploadError } = await supabase.storage.from('patient_documents').upload(filePath, file);
       if (uploadError) throw uploadError;
 
+      // 2. Update Patient Record with the new file URL
       const updatePayload: any = {};
       if (isSero) {
         updatePayload.serology_report_url = filePath; 
@@ -228,12 +236,18 @@ export default function ClinicalPatientRecord() {
         .eq('patient_id', selectedPatient.patient_id);
 
       if (updateError) throw updateError;
-      await supabase.from('notifications').insert([{
+
+      // 3. DIRECT SUPABASE INSERT (The Emergency Fix)
+      const { error: notifError } = await supabase.from('notifications').insert([{
         user_id: selectedPatient.user_id,
         title: 'Document Uploaded',
         message: `Your ${isSero ? 'Serology report' : 'Referral letter'} has been verified and uploaded by your Nephrologist.`,
         type: 'System'
       }]);
+
+      if (notifError) {
+        console.error("Supabase Insert Error: ", notifError);
+      }
 
       alert(`${isSero ? 'Serology report' : 'Referral letter'} uploaded successfully!`);
       fetchClinicalData();
@@ -269,16 +283,20 @@ export default function ClinicalPatientRecord() {
     if (checkWeight < 20 || checkWeight > 250) return alert("Clinical Warning: Target Dry Weight is outside safety limits.");
     if (checkDuration < 120 || checkDuration > 480) return alert("Clinical Warning: Target Duration is outside safety limits.");
 
+    const existingActiveRx = selectedPatient.prescriptions?.find((p: any) => p.status === 'Active');
+
     const payload = {
       patient_id: selectedPatient.patient_id,
       nephrologist_id: nephrologistId,
       ...rxForm,
       target_dry_weight: checkWeight,
+      vascular_access_type: existingActiveRx?.vascular_access_type || null,
+      vascular_access_location: existingActiveRx?.vascular_access_location || null,
+      vascular_access_complications: existingActiveRx?.vascular_access_complications || null,
       updated_at: new Date().toISOString(), 
       status: 'Active' 
     };
 
-    const existingActiveRx = selectedPatient.prescriptions?.find((p: any) => p.status === 'Active');
     if (existingActiveRx) {
       await supabase.from('prescriptions').update({ status: 'Archived' }).eq('id', existingActiveRx.id);
     } 
@@ -296,23 +314,32 @@ export default function ClinicalPatientRecord() {
 
   const handlePrint = () => window.print();
 
-  // NEW: Added dynamic `.sort()` logic chaining after the filter function
+  // NEW: Filtering logic updated to include documentFilter
   const filteredPatients = patients.filter(patient => {
     const matchesSearch = patient.users?.user_fullname.toLowerCase().includes(searchTerm.toLowerCase()) || patient.users?.user_ic.includes(searchTerm);
     const matchesBranch = branchFilter === 'All' || patient.home_branch_id?.toString() === branchFilter;
     const matchesRx = prescriptionFilter === 'All' || patient.rxStatus === prescriptionFilter;
-    return matchesSearch && matchesBranch && matchesRx;
+    
+    let matchesDocs = true;
+    const isComplete = patient.serology_document_status === 'Verified' && patient.referral_document_status === 'Verified';
+    
+    if (documentFilter === 'Missing') {
+      matchesDocs = !isComplete; // If missing is selected, only show patients who are NOT complete
+    } else if (documentFilter === 'Complete') {
+      matchesDocs = isComplete; // If complete is selected, only show complete
+    }
+
+    return matchesSearch && matchesBranch && matchesRx && matchesDocs;
   }).sort((a, b) => {
     if (sortBy === 'name_asc') {
       return (a.users?.user_fullname || '').localeCompare(b.users?.user_fullname || '');
     } else if (sortBy === 'name_desc') {
       return (b.users?.user_fullname || '').localeCompare(a.users?.user_fullname || '');
     } else if (sortBy === 'branch') {
-      const branchA = a.branches?.branch_name || 'Z_Unassigned'; // pushes unassigned to bottom
+      const branchA = a.branches?.branch_name || 'Z_Unassigned'; 
       const branchB = b.branches?.branch_name || 'Z_Unassigned';
       return branchA.localeCompare(branchB);
     } else if (sortBy === 'doc_status') {
-      // Missing docs come first for easy identification
       const scoreA = (a.serology_document_status === 'Verified' ? 1 : 0) + (a.referral_document_status === 'Verified' ? 1 : 0);
       const scoreB = (b.serology_document_status === 'Verified' ? 1 : 0) + (b.referral_document_status === 'Verified' ? 1 : 0);
       return scoreA - scoreB;
@@ -372,18 +399,32 @@ export default function ClinicalPatientRecord() {
             </div>
           </div>
 
-          {/* NEW: Dedicated Sorting Dropdown */}
-          <div className="relative">
-            <FiList className="absolute left-2.5 top-2.5 text-slate-400" />
-            <select 
-              value={sortBy} onChange={e => setSortBy(e.target.value)}
-              className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
-            >
-              <option value="name_asc">Sort: Name (A-Z)</option>
-              <option value="name_desc">Sort: Name (Z-A)</option>
-              <option value="branch">Sort: Branch Location</option>
-              <option value="doc_status">Sort: Document Status</option>
-            </select>
+          {/* NEW: Sorting and Missing Documents Filters in a 2-column layout */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <FiList className="absolute left-2.5 top-2.5 text-slate-400" />
+              <select 
+                value={sortBy} onChange={e => setSortBy(e.target.value)}
+                className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
+              >
+                <option value="name_asc">Sort: A-Z</option>
+                <option value="name_desc">Sort: Z-A</option>
+                <option value="branch">Sort: Branch</option>
+                <option value="doc_status">Sort: Missing First</option>
+              </select>
+            </div>
+
+            <div className="relative flex-1">
+              <FiFileText className="absolute left-2.5 top-2.5 text-slate-400" />
+              <select 
+                value={documentFilter} onChange={e => setDocumentFilter(e.target.value)}
+                className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
+              >
+                <option value="All">All Documents</option>
+                <option value="Missing">Missing Docs</option>
+                <option value="Complete">Complete Docs</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -399,8 +440,7 @@ export default function ClinicalPatientRecord() {
                 <span>{p.users.user_ic}</span> • <span>{p.branches?.branch_name || 'Unassigned'}</span>
               </p>
               
-              {/* NEW: Small indicator to show missing docs if sorted by Document Status */}
-              {sortBy === 'doc_status' && (!p.serology_document_status || !p.referral_document_status) && (
+              {(!p.serology_document_status || p.serology_document_status !== 'Verified' || !p.referral_document_status || p.referral_document_status !== 'Verified') && (
                  <p className="text-[9px] text-red-500 font-bold mt-1.5 flex items-center gap-1">
                    <FiAlertCircle /> Missing mandatory uploads
                  </p>
