@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { 
   FiSearch, FiEdit2, FiSave, FiActivity, FiDroplet, 
   FiFileText, FiUploadCloud, FiTrendingUp, FiShield, FiClipboard,
-  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter, FiMapPin, FiClock, FiAlertTriangle
+  FiAlertCircle, FiCheckCircle, FiLoader, FiPrinter, FiMapPin, FiClock, FiAlertTriangle, FiList
 } from 'react-icons/fi';
 
 export default function ClinicalPatientRecord() {
@@ -25,6 +25,9 @@ export default function ClinicalPatientRecord() {
   const [searchTerm, setSearchTerm] = useState('');
   const [branchFilter, setBranchFilter] = useState('All');
   const [prescriptionFilter, setPrescriptionFilter] = useState('All');
+  
+  // NEW: State for sorting, defaulting to Name Ascending
+  const [sortBy, setSortBy] = useState('name_asc');
 
   const [isClinicalModalOpen, setIsClinicalModalOpen] = useState(false);
   const [isUpdatingClinical, setIsUpdatingClinical] = useState(false);
@@ -71,11 +74,11 @@ export default function ClinicalPatientRecord() {
         prescriptions(*),
         treatments(session_date, session_status, fluid_removed, session_complications)
       `)
-      .order('patient_id', { ascending: false });
+      // We pull everything, sorting will now be handled dynamically on the frontend!
+      .order('patient_id', { ascending: false }); 
 
     if (patientError) console.error("Error fetching patients:", patientError);
 
-    // --- NEW: BACKEND LOGIC FOR 6-MONTH OVERDUE RULE ---
     const processedPatients = allPatients?.map(p => {
       const activeRx = Array.isArray(p.prescriptions) ? p.prescriptions.find((rx: any) => rx.status === 'Active') : null;
       let calculatedRxStatus = 'Missing/Expired';
@@ -86,9 +89,9 @@ export default function ClinicalPatientRecord() {
         const rxUpdatedDate = new Date(activeRx.updated_at);
 
         if (rxUpdatedDate < sixMonthsAgo) {
-          calculatedRxStatus = 'Overdue for Review'; // Yellow Warning
+          calculatedRxStatus = 'Overdue for Review'; 
         } else {
-          calculatedRxStatus = 'Active'; // Green OK
+          calculatedRxStatus = 'Active'; 
         }
       }
 
@@ -219,7 +222,6 @@ export default function ClinicalPatientRecord() {
         updatePayload.referral_document_status = 'Verified';
       }
 
-      
       const { error: updateError } = await supabase
         .from('patients')
         .update(updatePayload)
@@ -227,11 +229,11 @@ export default function ClinicalPatientRecord() {
 
       if (updateError) throw updateError;
       await supabase.from('notifications').insert([{
-  user_id: selectedPatient.user_id, // ensure you have the user_id 
-  title: 'Document Uploaded',
-  message: `Your ${isSero ? 'Serology report' : 'Referral letter'} has been verified and uploaded by your Nephrologist.`,
-  type: 'System'
-}]);
+        user_id: selectedPatient.user_id,
+        title: 'Document Uploaded',
+        message: `Your ${isSero ? 'Serology report' : 'Referral letter'} has been verified and uploaded by your Nephrologist.`,
+        type: 'System'
+      }]);
 
       alert(`${isSero ? 'Serology report' : 'Referral letter'} uploaded successfully!`);
       fetchClinicalData();
@@ -244,7 +246,6 @@ export default function ClinicalPatientRecord() {
   
   const handleViewDocument = async (filePath: string) => {
     let path = filePath;
-    // Fallback just in case your database still has old "http" URLs saved in it
     if (path.includes('http')) {
       path = path.split('/patient_documents/')[1];
     }
@@ -273,7 +274,7 @@ export default function ClinicalPatientRecord() {
       nephrologist_id: nephrologistId,
       ...rxForm,
       target_dry_weight: checkWeight,
-      updated_at: new Date().toISOString(), // This resets the 6-month clock!
+      updated_at: new Date().toISOString(), 
       status: 'Active' 
     };
 
@@ -295,11 +296,28 @@ export default function ClinicalPatientRecord() {
 
   const handlePrint = () => window.print();
 
+  // NEW: Added dynamic `.sort()` logic chaining after the filter function
   const filteredPatients = patients.filter(patient => {
     const matchesSearch = patient.users?.user_fullname.toLowerCase().includes(searchTerm.toLowerCase()) || patient.users?.user_ic.includes(searchTerm);
     const matchesBranch = branchFilter === 'All' || patient.home_branch_id?.toString() === branchFilter;
     const matchesRx = prescriptionFilter === 'All' || patient.rxStatus === prescriptionFilter;
     return matchesSearch && matchesBranch && matchesRx;
+  }).sort((a, b) => {
+    if (sortBy === 'name_asc') {
+      return (a.users?.user_fullname || '').localeCompare(b.users?.user_fullname || '');
+    } else if (sortBy === 'name_desc') {
+      return (b.users?.user_fullname || '').localeCompare(a.users?.user_fullname || '');
+    } else if (sortBy === 'branch') {
+      const branchA = a.branches?.branch_name || 'Z_Unassigned'; // pushes unassigned to bottom
+      const branchB = b.branches?.branch_name || 'Z_Unassigned';
+      return branchA.localeCompare(branchB);
+    } else if (sortBy === 'doc_status') {
+      // Missing docs come first for easy identification
+      const scoreA = (a.serology_document_status === 'Verified' ? 1 : 0) + (a.referral_document_status === 'Verified' ? 1 : 0);
+      const scoreB = (b.serology_document_status === 'Verified' ? 1 : 0) + (b.referral_document_status === 'Verified' ? 1 : 0);
+      return scoreA - scoreB;
+    }
+    return 0;
   });
 
   if (isLoading) return <div className="p-8 text-center font-bold text-blue-600"><FiActivity className="animate-spin mx-auto text-3xl mb-2" /> Loading Clinical Workstation...</div>;
@@ -342,7 +360,6 @@ export default function ClinicalPatientRecord() {
             
             <div className="relative flex-1">
               <FiFileText className="absolute left-2.5 top-2.5 text-slate-400" />
-              {/* NEW: Updated Filter Dropdown */}
               <select 
                 value={prescriptionFilter} onChange={e => setPrescriptionFilter(e.target.value)}
                 className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
@@ -354,6 +371,20 @@ export default function ClinicalPatientRecord() {
               </select>
             </div>
           </div>
+
+          {/* NEW: Dedicated Sorting Dropdown */}
+          <div className="relative">
+            <FiList className="absolute left-2.5 top-2.5 text-slate-400" />
+            <select 
+              value={sortBy} onChange={e => setSortBy(e.target.value)}
+              className="w-full pl-8 pr-2 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-[10px] font-bold text-slate-700 appearance-none shadow-sm"
+            >
+              <option value="name_asc">Sort: Name (A-Z)</option>
+              <option value="name_desc">Sort: Name (Z-A)</option>
+              <option value="branch">Sort: Branch Location</option>
+              <option value="doc_status">Sort: Document Status</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
@@ -361,13 +392,19 @@ export default function ClinicalPatientRecord() {
             <button key={p.patient_id} onClick={() => handleSelectPatient(p)} className={`w-full text-left p-4 rounded-2xl mb-2 transition-all border ${selectedPatient?.patient_id === p.patient_id ? 'bg-slate-900 border-slate-900 text-white shadow-lg' : 'bg-white border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
               <div className="flex justify-between items-start">
                 <p className="font-bold leading-tight truncate pr-2">{p.users.user_fullname}</p>
-                {/* NEW: Dynamic Warning Badges */}
                 {p.rxStatus === 'Missing/Expired' && <FiAlertCircle className="text-red-500 shrink-0" title="No Active Prescription" />}
                 {p.rxStatus === 'Overdue for Review' && <FiAlertTriangle className="text-amber-500 shrink-0" title="Overdue for 6-Month Review" />}
               </div>
               <p className={`text-[10px] font-black uppercase mt-1 flex gap-2 ${selectedPatient?.patient_id === p.patient_id ? 'text-slate-400' : 'text-slate-500'}`}>
                 <span>{p.users.user_ic}</span> • <span>{p.branches?.branch_name || 'Unassigned'}</span>
               </p>
+              
+              {/* NEW: Small indicator to show missing docs if sorted by Document Status */}
+              {sortBy === 'doc_status' && (!p.serology_document_status || !p.referral_document_status) && (
+                 <p className="text-[9px] text-red-500 font-bold mt-1.5 flex items-center gap-1">
+                   <FiAlertCircle /> Missing mandatory uploads
+                 </p>
+              )}
             </button>
           ))}
           {filteredPatients.length === 0 && (
@@ -390,7 +427,6 @@ export default function ClinicalPatientRecord() {
                     <h2 className="text-2xl font-black text-slate-900 print:text-black flex items-center gap-3">
                       {selectedPatient.users.user_fullname}
                       
-                      {/* NEW: Explicit Status Badge in Profile Header */}
                       {selectedPatient.rxStatus === 'Overdue for Review' && (
                         <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-1 rounded-md uppercase tracking-wider font-black flex items-center gap-1 border border-amber-200">
                           <FiAlertTriangle /> Review Overdue (6+ Mos)
@@ -473,7 +509,6 @@ export default function ClinicalPatientRecord() {
                     </div>
                   </div>
 
-                  {/* Warning Banner if Overdue */}
                   {selectedPatient.rxStatus === 'Overdue for Review' && !isEditing && (
                     <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3 print:hidden">
                       <FiAlertTriangle className="text-amber-600 text-xl shrink-0 mt-0.5" />
@@ -641,10 +676,10 @@ export default function ClinicalPatientRecord() {
 
                         <div className="flex gap-2">
                           {selectedPatient.serology_report_url && (
-  <button onClick={(e) => { e.preventDefault(); handleViewDocument(selectedPatient.serology_report_url); }} className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center gap-2 transition-colors flex-1 justify-center">
-    <FiCheckCircle /> View Active File
-  </button>
-)}
+                            <button onClick={(e) => { e.preventDefault(); handleViewDocument(selectedPatient.serology_report_url); }} className="text-xs px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center gap-2 transition-colors flex-1 justify-center">
+                              <FiCheckCircle /> View Active File
+                            </button>
+                          )}
                           
                           <input type="file" ref={serologyInputRef} onChange={(e) => handleFileUpload(e, 'serology')} className="hidden" accept="image/*,application/pdf" />
                           <button 
@@ -668,10 +703,10 @@ export default function ClinicalPatientRecord() {
                       <div className="mt-4 flex flex-col gap-3 justify-end h-full">
                         <div className="flex gap-2 mt-auto">
                           {selectedPatient.referral_letter_url && (
-  <button onClick={(e) => { e.preventDefault(); handleViewDocument(selectedPatient.referral_letter_url); }} className="text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center gap-2 transition-colors flex-1 justify-center">
-    <FiCheckCircle /> View Active File
-  </button>
-)}
+                            <button onClick={(e) => { e.preventDefault(); handleViewDocument(selectedPatient.referral_letter_url); }} className="text-xs px-4 py-2.5 bg-white text-purple-700 font-bold rounded-xl border border-purple-200 hover:bg-purple-100 flex items-center gap-2 transition-colors flex-1 justify-center">
+                              <FiCheckCircle /> View Active File
+                            </button>
+                          )}
                           
                           <input type="file" ref={referralInputRef} onChange={(e) => handleFileUpload(e, 'referral')} className="hidden" accept="image/*,application/pdf" />
                           <button 
