@@ -898,7 +898,7 @@ export default function ClinicalPatientRecord() {
                   />
                 </div>
 
-                <div>
+                {/* <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Usual Shift</label>
                   <select 
                     value={clinicalFormData.preferred_shift} 
@@ -910,7 +910,7 @@ export default function ClinicalPatientRecord() {
                     <option value="Afternoon (13:00 - 17:00)">Afternoon (13:00 - 17:00)</option>
                     <option value="Evening (18:00 - 22:00)">Evening (18:00 - 22:00)</option>
                   </select>
-                </div>
+                </div> */}
               </div>
 
               <div className="pt-4 flex gap-3">

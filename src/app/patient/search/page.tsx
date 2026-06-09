@@ -855,7 +855,7 @@ export default function PatientSearchBooking() {
       {eveningSlots > 0 ? `${eveningSlots} Slots Available` : 'Full (No Slots)'}
     </p>
   </div>
-  <button type="button" disabled={!isEligibleForSelectedDate || eveningSlots === 0} onClick={() => setDraftShift('Evening (18:00 - 22:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Evening') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+  <button type="button" disabled={!isEligibleForSelectedDate || eveningSlots === 0} onClick={() => setDraftShift('Evening (17:00 - 21:00)')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${!isEligibleForSelectedDate || eveningSlots === 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : draftShift.includes('Evening') ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
     {draftShift.includes('Evening') ? 'Selected' : 'Select'}
   </button>
 </div>
