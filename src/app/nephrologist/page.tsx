@@ -219,12 +219,19 @@ export default function ClinicalPatientRecord() {
         updatePayload.referral_document_status = 'Verified';
       }
 
+      
       const { error: updateError } = await supabase
         .from('patients')
         .update(updatePayload)
         .eq('patient_id', selectedPatient.patient_id);
 
       if (updateError) throw updateError;
+      await supabase.from('notifications').insert([{
+  user_id: selectedPatient.user_id, // ensure you have the user_id 
+  title: 'Document Uploaded',
+  message: `Your ${isSero ? 'Serology report' : 'Referral letter'} has been verified and uploaded by your Nephrologist.`,
+  type: 'System'
+}]);
 
       alert(`${isSero ? 'Serology report' : 'Referral letter'} uploaded successfully!`);
       fetchClinicalData();
