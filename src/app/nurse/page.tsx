@@ -12,6 +12,15 @@ export default function NurseDashboard() {
   const [nurseData, setNurseData] = useState<any>(null);
   const [todayShift, setTodayShift] = useState<any>(null);
   const [todayPatients, setTodayPatients] = useState<any[]>([]);
+  
+  // NEW: Real-time clock to automatically unlock buttons without refreshing
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Update the real-time clock every minute
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     async function fetchNurseDashboard() {
@@ -76,7 +85,6 @@ export default function NurseDashboard() {
             const todaysTreatment = b.patients.treatments?.find((t:any) => t.session_date === todayStr);
             
             // BULLETPROOF PRESCRIPTION CHECK
-            // We ensure it is an array, then check if ANY prescription has the status 'Active'
             const hasActivePrescription = Array.isArray(b.patients?.prescriptions) 
               ? b.patients.prescriptions.some((p: any) => p.status === 'Active') 
               : false;
@@ -89,7 +97,7 @@ export default function NurseDashboard() {
               ic: b.patients.users?.user_ic || 'N/A',
               blood_type: b.patients.patient_blood_type || '?',
               status: todaysTreatment ? todaysTreatment.session_status : 'Pending',
-              has_prescription: hasActivePrescription // The critical safety flag
+              has_prescription: hasActivePrescription 
             };
           });
           setTodayPatients(formattedPatients);
@@ -104,6 +112,24 @@ export default function NurseDashboard() {
 
     fetchNurseDashboard();
   }, []);
+
+  // NEW: Helper function to check if the current time has passed the shift start time
+  const checkIsTimeValid = (timeString: string) => {
+    if (!timeString) return true; // Fallback
+    
+    // Extracts the first time like "08:00" from "Morning (08:00 - 12:00)"
+    const match = timeString.match(/(\d{2}):(\d{2})/);
+    if (!match) return true;
+    
+    const shiftHour = parseInt(match[1], 10);
+    const shiftMinute = parseInt(match[2], 10);
+    
+    const currentHour = currentTime.getHours();
+    const currentMinute = currentTime.getMinutes();
+    
+    // Returns true if we are exactly at or past the starting hour/minute
+    return currentHour > shiftHour || (currentHour === shiftHour && currentMinute >= shiftMinute);
+  };
 
   if (isLoading) {
     return (
@@ -129,7 +155,7 @@ export default function NurseDashboard() {
 
       <div className="space-y-8">
         
-        {/* SHIFT ASSIGNMENT (Replacing Advisories) */}
+        {/* SHIFT ASSIGNMENT */}
         <div className="bg-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-lg shadow-slate-900/20 animate-in fade-in">
           <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 border-b border-slate-700 pb-3">My Shift Assignment</h3>
           
@@ -173,69 +199,120 @@ export default function NurseDashboard() {
           
           <div className="divide-y divide-slate-100">
             {todayPatients.length > 0 ? (
-              todayPatients.map((patient, idx) => (
-                <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors">
-                  <div className="flex items-center gap-5">
-                    <div className="h-12 w-12 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center font-black text-lg border border-slate-200 shrink-0">
-                      {patient.name.charAt(0)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-black text-lg text-slate-900">{patient.name}</p>
-                        <span className="px-2 py-0.5 bg-red-50 text-red-600 border border-red-100 rounded text-[9px] font-black">{patient.blood_type}</span>
+              todayPatients.map((patient, idx) => {
+                // Determine if we have passed the scheduled start time
+                const isTimeValid = checkIsTimeValid(patient.time);
+
+                return (
+                  <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-5">
+                      <div className="h-12 w-12 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center font-black text-lg border border-slate-200 shrink-0">
+                        {patient.name.charAt(0)}
                       </div>
-                      <p className="text-xs text-slate-500 font-bold mt-1 flex items-center gap-2">
-                        <FiClock className="text-slate-400" /> Slot: {patient.time ? patient.time.slice(0,18) : 'Anytime'} • IC: {patient.ic}
-                      </p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-black text-lg text-slate-900">{patient.name}</p>
+                          <span className="px-2 py-0.5 bg-red-50 text-red-600 border border-red-100 rounded text-[9px] font-black">{patient.blood_type}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 font-bold mt-1 flex items-center gap-2">
+                          <FiClock className="text-slate-400" /> Slot: {patient.time ? patient.time.slice(0,18) : 'Anytime'} • IC: {patient.ic}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      
+                      {/* STATE 1: Pending WITH a valid prescription */}
+                      {patient.status === 'Pending' && patient.has_prescription && (
+                        <>
+                          {isTimeValid ? (
+                            <Link href={`/nurse/treatments/start?patient_id=${patient.patient_id}&booking_id=${patient.booking_id}`} className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 text-white font-bold rounded-xl text-sm hover:bg-blue-700 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2">
+                              <FiPlayCircle className="text-lg" /> Start
+                            </Link>
+                          ) : (
+                            <button disabled className="w-full sm:w-auto px-5 py-2.5 bg-slate-100 text-slate-400 border border-slate-200 font-bold rounded-xl text-sm cursor-not-allowed flex items-center justify-center gap-2">
+                              <FiClock className="text-lg" /> Too Early
+                            </button>
+                          )}
+                          
+                          {/* EXCEPTION PATH: No-Show */}
+                          {/* EXCEPTION PATH: No-Show */}
+<button 
+  onClick={async () => {
+    if(confirm('Mark patient as No-Show/Cancelled? This will alert the Manager and the Patient.')) {
+      
+      // 1. Update the booking status
+      await supabase.from('bookings').update({ booking_status: 'Cancelled' }).eq('id', patient.booking_id);
+      
+      // 2. Fetch the patient's User ID (to notify them)
+      const { data: patientUser } = await supabase
+        .from('patients')
+        .select('user_id')
+        .eq('patient_id', patient.patient_id)
+        .single();
+
+      // 3. Send Critical Alert to the Patient
+      if (patientUser) {
+        await supabase.from('notifications').insert([{
+          user_id: patientUser.user_id,
+          title: 'URGENT: Missed Dialysis Session',
+          message: 'You have been marked as a No-Show for your scheduled session today. Please contact your center or submit a Reschedule Request immediately.',
+          type: 'Alert' // Using the Alert type makes it red in your UI!
+        }]);
+      }
+
+      // 4. Send Alert to the Branch Manager
+      const { data: managers } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('branch_id', nurseData.branchId)
+        .eq('role_id', 3); 
+
+      if (managers && managers.length > 0) {
+        const managerNotifs = managers.map(m => ({
+          user_id: m.user_id,
+          title: 'Machine Freed: Patient No-Show',
+          message: `Nurse ${nurseData.name} marked ${patient.name} as a No-Show. A machine is now available for this shift.`,
+          type: 'System'
+        }));
+        await supabase.from('notifications').insert(managerNotifs);
+      }
+
+      // 5. Reload the dashboard
+      window.location.reload();
+    }
+  }}
+  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 text-slate-500 hover:text-red-600 hover:bg-red-50 font-bold rounded-xl text-sm transition-all text-center"
+>
+  No-Show
+</button>
+                        </>
+                      )}
+
+                      {/* STATE 2: Pending WITHOUT a prescription */}
+                      {patient.status === 'Pending' && !patient.has_prescription && (
+                        <button disabled className="w-full sm:w-auto px-6 py-3 bg-slate-100 text-slate-400 font-bold rounded-xl text-sm border border-slate-200 cursor-not-allowed flex items-center justify-center gap-2">
+                          <FiAlertCircle className="text-lg" /> No Prescription
+                        </button>
+                      )}
+
+                      {/* STATE 3: Ongoing Treatment */}
+                      {patient.status === 'Ongoing' && (
+                        <Link href={`/nurse/treatments/monitor?patient_id=${patient.patient_id}&booking_id=${patient.booking_id}`} className="w-full sm:w-auto px-6 py-3 bg-amber-500 text-white font-bold rounded-xl text-sm hover:bg-amber-600 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2">
+                          <FiActivity className="text-lg" /> Monitor Vitals
+                        </Link>
+                      )}
+
+                      {/* STATE 4: Completed Treatment */}
+                      {patient.status === 'Completed' && (
+                        <span className="w-full sm:w-auto px-6 py-3 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2">
+                          <FiCheckCircle className="text-lg" /> Discharged
+                        </span>
+                      )}
                     </div>
                   </div>
-                  
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    
-                    {/* STATE 1: Pending WITH a valid prescription (Green Light) */}
-                    {patient.status === 'Pending' && patient.has_prescription && (
-                      <>
-                        <Link href={`/nurse/treatments/start?patient_id=${patient.patient_id}&booking_id=${patient.booking_id}`} className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 text-white font-bold rounded-xl text-sm hover:bg-blue-700 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2">
-                          <FiPlayCircle className="text-lg" /> Start
-                        </Link>
-                        {/* EXCEPTION PATH: No-Show */}
-                        <button 
-                          onClick={async () => {
-                            if(confirm('Mark patient as No-Show/Cancelled?')) {
-                              await supabase.from('bookings').update({ booking_status: 'Cancelled' }).eq('id', patient.booking_id);
-                              window.location.reload();
-                            }
-                          }}
-                          className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 text-slate-500 hover:text-red-600 hover:bg-red-50 font-bold rounded-xl text-sm transition-all text-center"
-                        >
-                          No-Show
-                        </button>
-                      </>
-                    )}
-
-                    {/* STATE 2: Pending WITHOUT a prescription (Red Light / Disabled) */}
-                    {patient.status === 'Pending' && !patient.has_prescription && (
-                      <button disabled className="w-full sm:w-auto px-6 py-3 bg-slate-100 text-slate-400 font-bold rounded-xl text-sm border border-slate-200 cursor-not-allowed flex items-center justify-center gap-2">
-                        <FiAlertCircle className="text-lg" /> No Prescription
-                      </button>
-                    )}
-
-                    {/* STATE 3: Ongoing Treatment */}
-                    {patient.status === 'Ongoing' && (
-                      <Link href={`/nurse/treatments/monitor?patient_id=${patient.patient_id}&booking_id=${patient.booking_id}`} className="w-full sm:w-auto px-6 py-3 bg-amber-500 text-white font-bold rounded-xl text-sm hover:bg-amber-600 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2">
-                        <FiActivity className="text-lg" /> Monitor Vitals
-                      </Link>
-                    )}
-
-                    {/* STATE 4: Completed Treatment */}
-                    {patient.status === 'Completed' && (
-                      <span className="w-full sm:w-auto px-6 py-3 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2">
-                        <FiCheckCircle className="text-lg" /> Discharged
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="p-12 text-center flex flex-col items-center justify-center">
                 <FiUsers className="text-4xl text-slate-200 mb-3" />

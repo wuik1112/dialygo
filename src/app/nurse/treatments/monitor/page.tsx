@@ -37,11 +37,11 @@ function MonitorContent() {
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
   const [isOverrideActive, setIsOverrideActive] = useState(false);
   
-  const isTimeComplete = elapsedMinutes >= targetMinutes;
-  
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(isPaused); 
   const [interventionFeedback, setInterventionFeedback] = useState<string | null>(null);
+
+  const isTimeComplete = elapsedMinutes >= targetMinutes;
 
   useEffect(() => {
     isPausedRef.current = isPaused;
@@ -57,12 +57,18 @@ function MonitorContent() {
         if (userData) setCurrentNurseId(userData.user_id);
       }
 
-      // UPGRADED: Explicitly fetch user_id from the patients table for the notification system
       const { data: treatmentData } = await supabase.from('treatments').select(`*, patients(user_id, users(user_fullname, user_ic), prescriptions(status, target_duration))`).eq('patient_id', patientId).eq('session_status', 'Ongoing').single();
 
       if (treatmentData) {
         setTreatment(treatmentData);
-        setDischargeForm(prev => ({ ...prev, fluid_removed: treatmentData.target_uf?.toString() || '' }));
+        setIsPaused(treatmentData.is_paused || false);
+        
+        // Load existing complications from database
+        setDischargeForm(prev => ({ 
+          ...prev, 
+          fluid_removed: treatmentData.target_uf?.toString() || '',
+          complications: treatmentData.session_complications || '' 
+        }));
 
         const activeRx = treatmentData.patients?.prescriptions?.find((p: any) => p.status === 'Active');
         if (activeRx && activeRx.target_duration) setTargetMinutes(activeRx.target_duration);
@@ -72,8 +78,17 @@ function MonitorContent() {
           const startDate = new Date(treatmentData.session_date);
           startDate.setHours(hours, minutes, seconds || 0);
           const now = new Date();
-          const diffMs = now.getTime() - startDate.getTime();
-          setElapsedMinutes(Math.max(Math.floor(diffMs / 60000), 0));
+          
+          let diffMs = now.getTime() - startDate.getTime();
+          let pausedMs = (treatmentData.total_paused_minutes || 0) * 60000;
+          
+          // If currently paused, add the time spent in the current pause state
+          if (treatmentData.is_paused && treatmentData.last_paused_at) {
+            const lastPaused = new Date(treatmentData.last_paused_at);
+            pausedMs += (now.getTime() - lastPaused.getTime());
+          }
+
+          setElapsedMinutes(Math.max(Math.floor((diffMs - pausedMs) / 60000), 0));
         }
 
         const { data: logsData } = await supabase.from('session_logs').select('*').eq('session_id', treatmentData.session_id).order('log_time', { ascending: false });
@@ -92,13 +107,39 @@ function MonitorContent() {
     return () => clearInterval(interval);
   }, [treatment]);
 
-  const handleTogglePause = () => {
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // NEW: Completely rewritten to sync with Supabase in real-time
+  const handleTogglePause = async () => {
     const newState = !isPaused;
     setIsPaused(newState);
+    
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const actionText = newState ? "Treatment PAUSED" : "Treatment RESUMED";
     const logEntry = `[${time}] ${actionText}\n`;
-    setDischargeForm(prev => ({ ...prev, complications: prev.complications ? prev.complications + logEntry : logEntry }));
+    const updatedComplications = dischargeForm.complications ? dischargeForm.complications + logEntry : logEntry;
+
+    setDischargeForm(prev => ({ ...prev, complications: updatedComplications }));
+
+    let updatedTotalPaused = treatment?.total_paused_minutes || 0;
+    
+    // If resuming, calculate how long it was paused and add to the total
+    if (!newState && treatment?.last_paused_at) { 
+      const lastPaused = new Date(treatment.last_paused_at);
+      const pausedDurationMins = Math.floor((new Date().getTime() - lastPaused.getTime()) / 60000);
+      updatedTotalPaused += pausedDurationMins;
+    }
+
+    const updatePayload = {
+      is_paused: newState,
+      last_paused_at: newState ? new Date().toISOString() : null,
+      total_paused_minutes: updatedTotalPaused,
+      session_complications: updatedComplications
+    };
+
+    // Save to Database immediately
+    await supabase.from('treatments').update(updatePayload).eq('session_id', treatment.session_id);
+    
+    // Update local treatment state
+    setTreatment((prev: any) => ({ ...prev, ...updatePayload }));
   };
 
   const handleAddHourlyLog = async (e: React.FormEvent) => {
@@ -130,10 +171,16 @@ function MonitorContent() {
     }
   };
 
-  const handleQuickIntervention = (interventionText: string) => {
+  // NEW: Updated to sync custom interventions immediately to the database
+  const handleQuickIntervention = async (interventionText: string) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const logEntry = `[${time}] ${interventionText}\n`;
-    setDischargeForm(prev => ({ ...prev, complications: prev.complications ? prev.complications + logEntry : logEntry }));
+    const updatedComplications = dischargeForm.complications ? dischargeForm.complications + logEntry : logEntry;
+    
+    setDischargeForm(prev => ({ ...prev, complications: updatedComplications }));
+    
+    await supabase.from('treatments').update({ session_complications: updatedComplications }).eq('session_id', treatment.session_id);
+
     setInterventionFeedback("Intervention Logged Successfully");
     setTimeout(() => setInterventionFeedback(null), 3000);
   };
@@ -172,7 +219,6 @@ function MonitorContent() {
         await supabase.from('bookings').update({ booking_status: 'Completed' }).eq('id', finalBookingId);
       }
 
-      // --- NEW: Discharge Notification to Patient ---
       const patientUserId = treatment.patients?.user_id;
       if (patientUserId) {
         await supabase.from('notifications').insert([{
@@ -183,7 +229,6 @@ function MonitorContent() {
           is_read: false
         }]);
       }
-      // ----------------------------------------------
 
       router.push('/nurse/logs'); 
     } catch (error: any) {
