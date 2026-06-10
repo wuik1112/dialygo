@@ -13,10 +13,8 @@ export default function NurseDashboard() {
   const [todayShift, setTodayShift] = useState<any>(null);
   const [todayPatients, setTodayPatients] = useState<any[]>([]);
   
-  // NEW: Real-time clock to automatically unlock buttons without refreshing
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Update the real-time clock every minute
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
@@ -28,7 +26,6 @@ export default function NurseDashboard() {
         const { data: sessionData } = await supabase.auth.getSession();
         if (!sessionData.session) return;
 
-        // 1. Fetch Nurse Profile
         const { data: userData } = await supabase
           .from('users')
           .select('user_id, user_fullname, branch_id, branches(branch_name)')
@@ -49,7 +46,6 @@ export default function NurseDashboard() {
 
         const todayStr = new Date().toISOString().split('T')[0];
 
-        // 2. Fetch Today's Shift Assignment
         const { data: shiftData } = await supabase
           .from('staff_roster')
           .select('*')
@@ -59,7 +55,7 @@ export default function NurseDashboard() {
         
         setTodayShift(shiftData);
 
-        // 3. Fetch Today's Patients AND their Prescriptions
+        // FIX IS HERE: Added session_date to the treatments select query
         const { data: bookings, error } = await supabase
           .from('bookings')
           .select(`
@@ -69,7 +65,7 @@ export default function NurseDashboard() {
               patient_id,
               patient_blood_type,
               users!inner(user_fullname, user_ic),
-              treatments(session_id, session_status),
+              treatments(session_id, session_status, session_date), 
               prescriptions(status)
             )
           `)
@@ -79,12 +75,11 @@ export default function NurseDashboard() {
 
         if (error) console.error("Supabase Bookings Error:", error);
 
-        // Format patient list and check for safety constraints
         if (bookings) {
           const formattedPatients = bookings.map((b: any) => {
+            // Now this will successfully find the treatment because session_date is loaded!
             const todaysTreatment = b.patients.treatments?.find((t:any) => t.session_date === todayStr);
             
-            // BULLETPROOF PRESCRIPTION CHECK
             const hasActivePrescription = Array.isArray(b.patients?.prescriptions) 
               ? b.patients.prescriptions.some((p: any) => p.status === 'Active') 
               : false;
@@ -113,11 +108,9 @@ export default function NurseDashboard() {
     fetchNurseDashboard();
   }, []);
 
-  // NEW: Helper function to check if the current time has passed the shift start time
   const checkIsTimeValid = (timeString: string) => {
-    if (!timeString) return true; // Fallback
+    if (!timeString) return true; 
     
-    // Extracts the first time like "08:00" from "Morning (08:00 - 12:00)"
     const match = timeString.match(/(\d{2}):(\d{2})/);
     if (!match) return true;
     
@@ -127,7 +120,6 @@ export default function NurseDashboard() {
     const currentHour = currentTime.getHours();
     const currentMinute = currentTime.getMinutes();
     
-    // Returns true if we are exactly at or past the starting hour/minute
     return currentHour > shiftHour || (currentHour === shiftHour && currentMinute >= shiftMinute);
   };
 
@@ -200,7 +192,6 @@ export default function NurseDashboard() {
           <div className="divide-y divide-slate-100">
             {todayPatients.length > 0 ? (
               todayPatients.map((patient, idx) => {
-                // Determine if we have passed the scheduled start time
                 const isTimeValid = checkIsTimeValid(patient.time);
 
                 return (
@@ -236,56 +227,50 @@ export default function NurseDashboard() {
                           )}
                           
                           {/* EXCEPTION PATH: No-Show */}
-                          {/* EXCEPTION PATH: No-Show */}
-<button 
-  onClick={async () => {
-    if(confirm('Mark patient as No-Show/Cancelled? This will alert the Manager and the Patient.')) {
-      
-      // 1. Update the booking status
-      await supabase.from('bookings').update({ booking_status: 'Cancelled' }).eq('id', patient.booking_id);
-      
-      // 2. Fetch the patient's User ID (to notify them)
-      const { data: patientUser } = await supabase
-        .from('patients')
-        .select('user_id')
-        .eq('patient_id', patient.patient_id)
-        .single();
+                          <button 
+                            onClick={async () => {
+                              if(confirm('Mark patient as No-Show/Cancelled? This will alert the Manager and the Patient.')) {
+                                
+                                await supabase.from('bookings').update({ booking_status: 'Cancelled' }).eq('id', patient.booking_id);
+                                
+                                const { data: patientUser } = await supabase
+                                  .from('patients')
+                                  .select('user_id')
+                                  .eq('patient_id', patient.patient_id)
+                                  .single();
 
-      // 3. Send Critical Alert to the Patient
-      if (patientUser) {
-        await supabase.from('notifications').insert([{
-          user_id: patientUser.user_id,
-          title: 'URGENT: Missed Dialysis Session',
-          message: 'You have been marked as a No-Show for your scheduled session today. Please contact your center or submit a Reschedule Request immediately.',
-          type: 'Alert' // Using the Alert type makes it red in your UI!
-        }]);
-      }
+                                if (patientUser) {
+                                  await supabase.from('notifications').insert([{
+                                    user_id: patientUser.user_id,
+                                    title: 'URGENT: Missed Dialysis Session',
+                                    message: 'You have been marked as a No-Show for your scheduled session today. Please contact your center or submit a Reschedule Request immediately.',
+                                    type: 'Alert'
+                                  }]);
+                                }
 
-      // 4. Send Alert to the Branch Manager
-      const { data: managers } = await supabase
-        .from('users')
-        .select('user_id')
-        .eq('branch_id', nurseData.branchId)
-        .eq('role_id', 3); 
+                                const { data: managers } = await supabase
+                                  .from('users')
+                                  .select('user_id')
+                                  .eq('branch_id', nurseData.branchId)
+                                  .eq('role_id', 3); 
 
-      if (managers && managers.length > 0) {
-        const managerNotifs = managers.map(m => ({
-          user_id: m.user_id,
-          title: 'Machine Freed: Patient No-Show',
-          message: `Nurse ${nurseData.name} marked ${patient.name} as a No-Show. A machine is now available for this shift.`,
-          type: 'System'
-        }));
-        await supabase.from('notifications').insert(managerNotifs);
-      }
+                                if (managers && managers.length > 0) {
+                                  const managerNotifs = managers.map(m => ({
+                                    user_id: m.user_id,
+                                    title: 'Machine Freed: Patient No-Show',
+                                    message: `Nurse ${nurseData.name} marked ${patient.name} as a No-Show. A machine is now available for this shift.`,
+                                    type: 'System'
+                                  }));
+                                  await supabase.from('notifications').insert(managerNotifs);
+                                }
 
-      // 5. Reload the dashboard
-      window.location.reload();
-    }
-  }}
-  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 text-slate-500 hover:text-red-600 hover:bg-red-50 font-bold rounded-xl text-sm transition-all text-center"
->
-  No-Show
-</button>
+                                window.location.reload();
+                              }
+                            }}
+                            className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 text-slate-500 hover:text-red-600 hover:bg-red-50 font-bold rounded-xl text-sm transition-all text-center"
+                          >
+                            No-Show
+                          </button>
                         </>
                       )}
 

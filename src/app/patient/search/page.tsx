@@ -295,7 +295,7 @@ export default function PatientSearchBooking() {
     async function checkAvailability() {
       setIsCheckingSlots(true);
       try {
-        const maxCapacity = selectedBranch.available_slots > 0 ? selectedBranch.available_slots : selectedBranch.total_machines || 8;
+        const maxCapacity = selectedBranch.total_machines || 8;
         const { data: existingBookings, error } = await supabase
           .from('bookings').select('booking_session_time')
           .eq('branch_id', selectedBranch.id).eq('booking_date', draftDate).neq('booking_status', 'Cancelled');
@@ -377,7 +377,7 @@ export default function PatientSearchBooking() {
     setIsSubmitting(true);
 
     try {
-      const maxCapacity = selectedBranch.available_slots > 0 ? selectedBranch.available_slots : selectedBranch.total_machines || 8;
+      const maxCapacity = selectedBranch.total_machines || 8;
 
       // 1. Concurrency Check before Locking
       for (const session of selectedSessions) {
